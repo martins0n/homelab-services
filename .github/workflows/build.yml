@@ -1,0 +1,31 @@
+name: Build and push docker image from trunk
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  docker-build-and-push:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        dockerfile:
+          - {"name": hello, "path": hello/Dockerfile}
+    steps:
+      - uses: actions/checkout@v2
+      - name: Build image
+        run: |
+          cd $( dirname ${{ matrix.dockerfile.path }})
+          docker build . --tag image
+      - name: Log into registry
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+      - name: Push image
+        run: |
+          IMAGE_ID=ghcr.io/${{ github.repository }}/${{ matrix.dockerfile.name }}
+          VERSION=latest
+          echo IMAGE_ID=$IMAGE_ID
+          echo VERSION=$VERSION
+          docker tag image $IMAGE_ID:$VERSION
+          docker push $IMAGE_ID:$VERSION
