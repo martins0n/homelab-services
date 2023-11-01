@@ -4,9 +4,6 @@ version: '3.8'
 
 services:
   nginx:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ghcr.io/martins0n/homelab-services/hello:latest
     ports:
       - 8080:80
-    pull_policy: build
