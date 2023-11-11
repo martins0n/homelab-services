@@ -44,8 +44,6 @@ router.addDefaultHandler(async (msg) => {
   });
   const { choices } = await response.json();
     
-  console.log(messagesToSend);
-
   const answer = choices[0].message;
   await bot.sendMessage(id, answer.content);
   console.log('message sent');
