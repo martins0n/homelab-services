@@ -4,7 +4,7 @@ import openai from '../../lib/openai';
 import { filterMessagesContextSize } from '../../lib/openai';
 import messageRepository from '../../storage/messageRepository';
 import { Message } from '../../storage/messageRepository';
-import { TIMEOUT, SUMMARY_QUEUE_URL, YA_API, MODEL } from '../../config'; 
+import { TIMEOUT, SUMMARY_QUEUE_URL, YA_API, MODEL, X_TELEGRAM_BOT_HEADER } from '../../config'; 
 import TelegramBot from '../../lib/telegram';
 
 export const config = {
@@ -120,6 +120,14 @@ const handler =  async (req) => {
 }
 
 export default async (req) => {
+  // check header for telegram bot
+  const xTelegramBotHeader = req.headers.get("X-Telegram-Bot-Api-Secret-Token");
+  if (xTelegramBotHeader !== X_TELEGRAM_BOT_HEADER) {
+      return new Response('Unauthorized', {
+      status: 200,
+      headers: { 'Content-Type': 'text/html; charset=utf-8' }
+      });
+  }
   const encoder = new TextEncoder();
  
   const readable = new ReadableStream({
