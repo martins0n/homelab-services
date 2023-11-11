@@ -16,6 +16,7 @@ jobs:
       matrix:
         dockerfile:
           - {"name": hello, "path": hello/Dockerfile}
+          - {"name": support-bot, "path": support-bot/Dockerfile}
     steps:
       - uses: actions/checkout@v2
       - name: Build image
@@ -32,3 +33,5 @@ jobs:
           echo VERSION=$VERSION
           docker tag image $IMAGE_ID:$VERSION
           docker push $IMAGE_ID:$VERSION
+          docker tag image $IMAGE_ID:$GITHUB_SHA
+          docker push $IMAGE_ID:$GITHUB_SHA

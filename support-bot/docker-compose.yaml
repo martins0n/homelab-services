@@ -1,0 +1,9 @@
+# create docker-compose nginx for hosting hw.html
+
+version: '3.8'
+
+services:
+  support-bot:
+    image: ghcr.io/martins0n/homelab-services/support-bot:latest
+    ports:
+      - 8081:3000
