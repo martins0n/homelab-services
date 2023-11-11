@@ -33,9 +33,6 @@ router.addDefaultHandler(async (msg) => {
     content: msg.text as string,
     user: "user",
   }
-  
-
-  console.log(messages)
 
   const messagesToSend = filterMessagesContextSize([...messages.map(({ content, user }) => ({role: user, content})), { role: 'user', content: msg.text }]);
   const response = await openai.createChatCompletion({
