@@ -1,3 +1,3 @@
-export default async (_) => {
-    return new Response('ok', { status: 200 });
+export default async (req, res) => {
+    return res.status(200).json({ status: 'Healthy' })
 }
