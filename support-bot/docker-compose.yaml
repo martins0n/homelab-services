@@ -5,6 +5,7 @@ version: '3.8'
 services:
   support-bot:
     image: ghcr.io/martins0n/homelab-services/support-bot:latest
+    restart: unless-stopped
     ports:
       - 8081:3000
     env_file:
