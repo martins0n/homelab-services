@@ -8,13 +8,21 @@ services:
     env_file:
       - ../stack.env
     image: ghcr.io/martins0n/homelab-services/ray-cluster:latest
-    command: ["ulimit", "-n", "65536", "ray", "start", "--head", "--port=6379", "--dashboard-host=0.0.0.0", "--block"]
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    command: ["ray", "start", "--head", "--port=6379", "--dashboard-host=0.0.0.0", "--block"]
   ray-worker:
     image: ghcr.io/martins0n/homelab-services/ray-cluster:latest
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     env_file:
       - ../stack.env
     deploy:
       replicas: 3
-    command: ["ulimit", "-n", "65536", "ray", "start", "--address=ray-head:6379", "--block"]
+    command: ["ray", "start", "--address=ray-head:6379", "--block"]
     depends_on:
       - ray-head
