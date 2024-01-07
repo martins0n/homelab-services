@@ -9,7 +9,7 @@ services:
       - ../stack.env
     image: ghcr.io/martins0n/homelab-services/ray-cluster:latest
     restart: unless-stopped
-    command: ["ray", "start", "--head", "--port=6379", "--address=0.0.0.0", "--dashboard-host=0.0.0.0", "--block"]
+    command: ["ray", "start", "--head", "--port=6379", "--dashboard-host=0.0.0.0", "--block"]
   ray-worker:
     image: ghcr.io/martins0n/homelab-services/ray-cluster:latest
     restart: unless-stopped
