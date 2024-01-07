@@ -7,14 +7,12 @@ services:
       - "10001:10001"
     env_file:
       - ../stack.env
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ghcr.io/martins0n/homelab-services/ray-cluster:latest
+    restart: unless-stopped
     command: ["ray", "start", "--head", "--port=6379", "--address=0.0.0.0", "--dashboard-host=0.0.0.0", "--block"]
   ray-worker:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ghcr.io/martins0n/homelab-services/ray-cluster:latest
+    restart: unless-stopped
     env_file:
       - ../stack.env
     deploy:

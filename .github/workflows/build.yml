@@ -17,6 +17,7 @@ jobs:
         dockerfile:
           - {"name": hello, "path": hello/Dockerfile}
           - {"name": support-bot, "path": support-bot/Dockerfile}
+          - {"name": ray-cluster, "path": ray-cluster/Dockerfile}
     steps:
       - uses: actions/checkout@v2
       - name: Build image
