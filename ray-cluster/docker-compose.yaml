@@ -6,7 +6,7 @@ services:
       - "8265:8265"
       - "10001:10001"
     env_file:
-      - stack.env
+      - ../stack.env
     build:
       context: .
       dockerfile: Dockerfile
@@ -16,7 +16,7 @@ services:
       context: .
       dockerfile: Dockerfile
     env_file:
-      - stack.env
+      - ../stack.env
     deploy:
       replicas: 3
     command: ["ray", "start", "--address=ray-head:6379", "--redis-password=${redis-password}", "--block"]
