@@ -17,6 +17,6 @@ services:
       - ../stack.env
     deploy:
       replicas: 3
-    command: ["ray", "start", "--address=ray-head:6379", "--redis-password=${redis-password}", "--block"]
+    command: ["ray", "start", "--address=ray-head:6379", "--block"]
     depends_on:
       - ray-head
