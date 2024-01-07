@@ -1,0 +1,24 @@
+version: "3.9"
+services:
+  ray-head:
+    ports:
+      - "6379:6379"
+      - "8265:8265"
+      - "10001:10001"
+    env_file:
+      - stack.env
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["ray", "start", "--head", "--port=6379", "--address=0.0.0.0", "--dashboard-host=0.0.0.0", "--block"]
+  ray-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - stack.env
+    deploy:
+      replicas: 3
+    command: ["ray", "start", "--address=ray-head:6379", "--redis-password=${redis-password}", "--block"]
+    depends_on:
+      - ray-head
