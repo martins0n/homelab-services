@@ -32,6 +32,14 @@ class messageRepository {
     data.reverse();
     return data;
   }
+
+  async ping() : Promise<any> {
+    const {data, _ } = await this.connection
+      .from('message')
+      .select('1')
+      .limit(1)
+    return data;
+  }
 }
 
 export default new messageRepository();
