@@ -11,3 +11,5 @@ cron.schedule('*/30 * * * *', () => {
     })
 
 });
+
+export default cron;
