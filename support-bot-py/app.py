@@ -165,6 +165,6 @@ async def health():
     return {"status": "ok"}
 
 
-@app.get("/api/ping")
+@app.get("/api/health")
 async def ping():
     return await message_repository.ping()
