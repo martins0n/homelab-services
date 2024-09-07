@@ -10,6 +10,7 @@ from openai import AsyncOpenAI
 from repository import Message, MessageRepository
 from schemas import TelegramMessage, TelegramRequest
 from settings import Settings
+from summarizer import summary_url
 from telegram import TelegramBot
 from utils import filter_context_size
 
@@ -103,16 +104,8 @@ async def handle_summary(chat_id, matched):
 async def handle_summary_url(chat_id, matched):
     logger.info(f"Received /summary_url command with URL: {matched}")
     url = re.search(r"(https?://[^\s]+)", matched).group(0)
-
-    async with httpx.AsyncClient() as client:
-        await client.post(
-            settings.summary_queue_url,
-            json={"url": url, "chat_id": chat_id},
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Api-Key {settings.ya_api}",
-            },
-        )
+    summary_text = await asyncio.to_thread(summary_url, url)
+    await telegram_bot.send_message(chat_id, f"Summary:\n\n{summary_text}")
 
 
 async def handle_prompt(chat_id, matched):
