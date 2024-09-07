@@ -3,7 +3,7 @@ import re
 from typing import Annotated
 
 import httpx
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from loguru import logger
 from openai import AsyncOpenAI
 
@@ -18,9 +18,10 @@ settings = Settings()
 app = FastAPI()
 
 
-async def verify_token(x_telegram_bot_api_secret_token: Annotated[str, Header()]):
-    if x_telegram_bot_api_secret_token != settings.x_telegram_bot_header:
-        raise HTTPException(status_code=200, detail="Invalid token")
+async def verify_token(request: Request):
+    logger.info(request.headers)
+    # if x_telegram_bot_api_secret_token != settings.x_telegram_bot_header:
+    #     raise HTTPException(status_code=200, detail="Invalid token")
 
 
 telegram_bot = TelegramBot(settings.telegram_token)
