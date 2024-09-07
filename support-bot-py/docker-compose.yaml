@@ -1,0 +1,12 @@
+# create docker-compose nginx for hosting hw.html
+
+version: '3.8'
+
+services:
+  support-bot-py:
+    image: ghcr.io/martins0n/homelab-services/support-bot-py:latest
+    restart: unless-stopped
+    ports:
+      - 8082:8000
+    env_file:
+      - ../stack.env

@@ -15,24 +15,25 @@ jobs:
       fail-fast: false
       matrix:
         dockerfile:
-          - {"name": hello, "path": hello/Dockerfile}
-          - {"name": support-bot, "path": support-bot/Dockerfile}
-          - {"name": ray-cluster, "path": ray-cluster/Dockerfile}
+          - {"name": "hello", "path": "hello/Dockerfile"}
+          - {"name": "support-bot", "path": "support-bot/Dockerfile"}
+          - {"name": "support-bot-py", "path": "support-bot-py/Dockerfile"}
     steps:
       - uses: actions/checkout@v2
-      - name: Build image
+      - name: Check and Build Docker Image
         run: |
-          cd $( dirname ${{ matrix.dockerfile.path }})
-          docker build . --tag image
-      - name: Log into registry
-        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-      - name: Push image
-        run: |
-          IMAGE_ID=ghcr.io/${{ github.repository }}/${{ matrix.dockerfile.name }}
-          VERSION=latest
-          echo IMAGE_ID=$IMAGE_ID
-          echo VERSION=$VERSION
-          docker tag image $IMAGE_ID:$VERSION
-          docker push $IMAGE_ID:$VERSION
-          docker tag image $IMAGE_ID:$GITHUB_SHA
-          docker push $IMAGE_ID:$GITHUB_SHA
+          CHANGED_FILES=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }} -- ${{ matrix.dockerfile.path }}/..)
+          if [ ! -z "$CHANGED_FILES" ]; then
+            echo "Changes detected in ${{ matrix.dockerfile.path }}, building the image..."
+            cd $( dirname ${{ matrix.dockerfile.path }})
+            docker build . --tag image
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            IMAGE_ID=ghcr.io/${{ github.repository }}/${{ matrix.dockerfile.name }}
+            VERSION=latest
+            docker tag image $IMAGE_ID:$VERSION
+            docker push $IMAGE_ID:$VERSION
+            docker tag image $IMAGE_ID:$GITHUB_SHA
+            docker push $IMAGE_ID:$GITHUB_SHA
+          else
+            echo "No changes detected in ${{ matrix.dockerfile.path }}, skipping build."
+          fi
