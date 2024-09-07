@@ -20,6 +20,8 @@ jobs:
           - {"name": "support-bot-py", "path": "support-bot-py/Dockerfile"}
     steps:
       - uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
       - name: Check and Build Docker Image
         run: |
           CHANGED_FILES=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }} -- ${{ matrix.dockerfile.path }}/..)
