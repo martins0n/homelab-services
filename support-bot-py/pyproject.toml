@@ -1,0 +1,23 @@
+[tool.poetry]
+name = "support-bot-py"
+version = "0.1.0"
+description = ""
+authors = ["martins0n <33594071+martins0n@users.noreply.github.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+fastapi = {extras = ["standard"], version = "^0.114.0"}
+openai = "^1.44.0"
+httpx = "^0.27.2"
+loguru = "^0.7.2"
+supabase = "^2.7.4"
+tiktoken = "^0.7.0"
+
+
+[tool.poetry.group.dev.dependencies]
+ruff = "^0.6.4"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
