@@ -56,7 +56,6 @@ async def handle_default(msg: TelegramMessage):
         settings.model,
     )
 
-    logger.info(f"Messages to send: {messages_to_send}")
     response = await openai.chat.completions.create(
         model=settings.model, messages=messages_to_send
     )
