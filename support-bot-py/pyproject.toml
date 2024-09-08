@@ -16,6 +16,7 @@ tiktoken = "^0.7.0"
 pydantic-settings = "^2.4.0"
 langchain = "<0.2.0"
 goose3 = "^3.1.19"
+youtube-transcript-api = "^0.6.2"
 
 
 [tool.poetry.group.dev.dependencies]

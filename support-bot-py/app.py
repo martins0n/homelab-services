@@ -13,6 +13,7 @@ from settings import Settings
 from summarizer import summary_url
 from telegram import TelegramBot
 from utils import filter_context_size
+from youtube import get_transcript_summary
 
 settings = Settings()
 
@@ -42,6 +43,13 @@ async def handle_start(chat_id):
         chat_id, "Hello! I'm a bot. Send me a message and I'll echo it back to you."
     )
 
+
+async def handle_summary_youtube(chat_id, matched):
+    logger.info(f"Received /summary_url command with URL: {matched}")
+    url = re.search(r"(https?://[^\s]+)", matched).group(0)
+    print(url)
+    summary_text = await asyncio.to_thread(get_transcript_summary, url)
+    await telegram_bot.send_message(chat_id, f"Summary {url}:\n\n{summary_text}")
 
 async def handle_default(msg: TelegramMessage):
     logger.info(f"Received default message: {msg.text}")
@@ -131,6 +139,9 @@ async def handle_message(request: TelegramRequest):
     elif text.startswith("/summary_url"):
         matched = re.match(r"/summary_url (.+)", text).group(1)
         await handle_summary_url(chat_id, matched)
+    elif text.startswith("/summary_youtube"):
+        matched = re.match(r"/summary_youtube (.+)", text).group(1)
+        await handle_summary_youtube(chat_id, matched)
     elif text.startswith("/summary"):
         matched = re.match(r"/summary (.+)", text).group(1)
         await handle_summary(chat_id, matched)
