@@ -51,6 +51,7 @@ async def handle_summary_youtube(chat_id, matched):
     summary_text = await asyncio.to_thread(get_transcript_summary, url)
     await telegram_bot.send_message(chat_id, f"Summary {url}:\n\n{summary_text}")
 
+
 async def handle_default(msg: TelegramMessage):
     logger.info(f"Received default message: {msg.text}")
     chat_id = msg.chat.id
@@ -92,6 +93,11 @@ async def handle_default(msg: TelegramMessage):
     )
 
     logger.info("Added messages to repository")
+
+
+async def handle_no_such_command(chat_id, matched):
+    logger.info(f"Received unknown command: {matched}")
+    await telegram_bot.send_message(chat_id, f"No such command: {matched}")
 
 
 async def handle_summary(chat_id, matched):
@@ -148,6 +154,9 @@ async def handle_message(request: TelegramRequest):
     elif text.startswith("/prompt"):
         matched = re.match(r"/prompt (.+)", text).group(1)
         await handle_prompt(chat_id, matched)
+    elif text.startswith("/"):
+        matched = re.match(r"/(.+)", text).group(1)
+        await handle_no_such_command(chat_id, matched)
     else:
         await handle_default(msg)
 
