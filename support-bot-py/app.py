@@ -2,7 +2,6 @@ import asyncio
 import re
 from typing import Annotated
 
-import httpx
 from fastapi import Depends, FastAPI, Header, HTTPException
 from loguru import logger
 from openai import AsyncOpenAI
