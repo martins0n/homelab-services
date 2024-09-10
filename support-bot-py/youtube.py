@@ -1,7 +1,7 @@
 import re
 
 from youtube_transcript_api import YouTubeTranscriptApi
-
+from summarizer import make_summary_single_call
 
 def get_youtube_id(url):
     youtube_regex = (
@@ -20,10 +20,8 @@ def get_transcript_summary(req: str):
     video_id = get_youtube_id(req)
     trans = YouTubeTranscriptApi.get_transcript(video_id, languages=["ru", "en"])
     full_text = " ".join(t["text"] for t in trans)
-    return full_text
-
-    #summary_text = make_summary(full_text)
-    #return summary_text
+    summary_text = make_summary_single_call(full_text)
+    return summary_text
 
 
 if __name__ == "__main__":
