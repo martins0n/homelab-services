@@ -19,7 +19,9 @@ settings = Settings()
 app = FastAPI()
 
 
-async def verify_token(x_telegram_bot_api_secret_token: Annotated[str, Header()]):
+async def verify_token(x_telegram_bot_api_secret_token: Annotated[str | None, Header()] = None):
+    if x_telegram_bot_api_secret_token is None:
+        raise HTTPException(status_code=200, detail="Unauthorized")
     if x_telegram_bot_api_secret_token != settings.x_telegram_bot_header:
         raise HTTPException(status_code=200, detail="Invalid token")
 
@@ -46,7 +48,6 @@ async def handle_start(chat_id):
 async def handle_summary_youtube(chat_id, matched):
     logger.info(f"Received /summary_url command with URL: {matched}")
     url = re.search(r"(https?://[^\s]+)", matched).group(0)
-    print(url)
     summary_text = await asyncio.to_thread(get_transcript_summary, url)
     await telegram_bot.send_message(chat_id, f"Summary {url}:\n\n{summary_text}")
 
