@@ -4,6 +4,7 @@ from youtube_transcript_api import YouTubeTranscriptApi
 
 from settings import Settings
 from summarizer import make_summary_single_call
+from loguru import logger
 
 settings = Settings()
 
@@ -21,17 +22,17 @@ def get_youtube_id(url):
         return None
 
 def get_transcript_summary(req: str):
+    logger.info(f"Getting transcript summary for {req}")
     video_id = get_youtube_id(req)
-    
+    logger.info(f"Video ID: {video_id}")
     if settings.youtube_proxy_url:
-        
         proxies = {"http": settings.youtube_proxy_url}
     else:
         proxies = None
-        
     trans = YouTubeTranscriptApi.get_transcript(
         video_id, languages=["ru", "en"],
-        proxies=proxies
+        proxies=proxies,
+        cookies=None
     )
 
     full_text = " ".join(t["text"] for t in trans)
@@ -42,9 +43,5 @@ def get_transcript_summary(req: str):
 if __name__ == "__main__":
     link = "https://youtu.be/Ga6kh8QknlA?si=pnAt41i40toSbU2Y"
     text = get_transcript_summary(link)
-    
-    from summarizer import make_summary_single_call
-    
-    summary = make_summary_single_call(text)
-    
-    print(summary)
+
+    print(text)
