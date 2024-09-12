@@ -17,3 +17,4 @@ class Settings(BaseSettings):
     openai_api_key: str
     context_size: int = 4096
     env: str = "dev"
+    youtube_proxy_url: str | None = None
