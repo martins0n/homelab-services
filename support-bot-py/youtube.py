@@ -26,7 +26,7 @@ def get_transcript_summary(req: str):
     video_id = get_youtube_id(req)
     logger.info(f"Video ID: {video_id}")
     if settings.youtube_proxy_url:
-        proxies = {"http": settings.youtube_proxy_url}
+        proxies = {"https": settings.youtube_proxy_url}
     else:
         proxies = None
     trans = YouTubeTranscriptApi.get_transcript(
