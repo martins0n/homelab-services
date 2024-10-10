@@ -1,7 +1,17 @@
-from typing import TypedDict
+from typing import Annotated, TypedDict
 
 import tiktoken
+from fastapi import Header, HTTPException
 from loguru import logger
+
+
+def create_verify_token_function(x_telegram_bot_header):
+    async def verify_token(x_telegram_bot_api_secret_token: Annotated[str | None, Header()] = None):
+        if x_telegram_bot_api_secret_token is None:
+            raise HTTPException(status_code=200, detail="Unauthorized")
+        if x_telegram_bot_api_secret_token != x_telegram_bot_header:
+            raise HTTPException(status_code=200, detail="Invalid token")
+    return verify_token
 
 
 class Message(TypedDict):

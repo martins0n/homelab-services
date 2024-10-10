@@ -4,17 +4,16 @@ from pydantic import BaseModel, Field
 class TelegramUser(BaseModel):
     id: int
     is_bot: bool
-    first_name: str | None
-    username: str | None
-    language_code: str
-    is_premium: bool
-
+    username: str | None = None
+    is_premium: bool | None = None
+    language_code: str | None = None
+    first_name: str | None = None
 
 class TelegramChat(BaseModel):
     id: int
-    first_name: str
-    username: str
     type: str
+    first_name: str | None = None
+    username: str | None = None
 
 
 class TelegramMessage(BaseModel):
@@ -22,7 +21,7 @@ class TelegramMessage(BaseModel):
     from_: TelegramUser = Field(..., alias="from")
     chat: TelegramChat
     date: int
-    text: str
+    text: str | None = None
 
 
 class TelegramRequest(BaseModel):

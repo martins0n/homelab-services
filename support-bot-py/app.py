@@ -6,24 +6,21 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from loguru import logger
 from openai import AsyncOpenAI
 
+from ban_bot.ban_bot import router as ban_bot_router
 from repository import Message, MessageRepository
 from schemas import TelegramMessage, TelegramRequest
 from settings import Settings
 from summarizer import summary_url
 from telegram import TelegramBot
-from utils import filter_context_size
+from utils import create_verify_token_function, filter_context_size
 from youtube import get_transcript_summary
 
 settings = Settings()
 
 app = FastAPI()
 
+app.include_router(ban_bot_router)
 
-async def verify_token(x_telegram_bot_api_secret_token: Annotated[str | None, Header()] = None):
-    if x_telegram_bot_api_secret_token is None:
-        raise HTTPException(status_code=200, detail="Unauthorized")
-    if x_telegram_bot_api_secret_token != settings.x_telegram_bot_header:
-        raise HTTPException(status_code=200, detail="Invalid token")
 
 
 telegram_bot = TelegramBot(settings.telegram_token)
@@ -160,6 +157,8 @@ async def handle_message(request: TelegramRequest):
     else:
         await handle_default(msg)
 
+
+verify_token = create_verify_token_function(settings.x_telegram_bot_header)
 
 if settings.env == "prod":
     dependencies = [Depends(verify_token)]

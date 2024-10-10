@@ -1,10 +1,10 @@
 import re
 
+from loguru import logger
 from youtube_transcript_api import YouTubeTranscriptApi
 
 from settings import Settings
 from summarizer import make_summary_single_call
-from loguru import logger
 
 settings = Settings()
 
