@@ -1,0 +1,61 @@
+name: Support Bot Py Tests
+
+on:
+  push:
+    branches:
+      - main # Or your primary branch name
+    paths:
+      - 'support-bot-py/**'
+      - '.github/workflows/support-bot-py-tests.yml'
+  pull_request:
+    branches:
+      - main # Or your primary branch name
+    paths:
+      - 'support-bot-py/**'
+      - '.github/workflows/support-bot-py-tests.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./support-bot-py
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10' # Match project's Python version
+
+      - name: Set up Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: '1.7.1' # Specify a recent Poetry version
+          virtualenvs-create: true
+          virtualenvs-in-project: true # Optional: keeps venv in project folder
+
+      - name: Install dependencies
+        run: poetry install --with dev --no-interaction --no-ansi
+
+      - name: Create .env.test file
+        run: |
+          echo "TELEGRAM_TOKEN='fake-telegram-token'" > tests/.env.test
+          echo "DATABASE_URL='http://fake-supabase-url'" >> tests/.env.test
+          echo "DATABASE_KEY='fake-supabase-key'" >> tests/.env.test
+          echo "SUMMARY_QUEUE_URL='fake-sqs-url'" >> tests/.env.test
+          echo "YA_API='fake-ya-api'" >> tests/.env.test
+          echo "X_TELEGRAM_BOT_HEADER='fake-header'" >> tests/.env.test
+          echo "OPENAI_API_KEY='sk-fakekey'" >> tests/.env.test
+          echo "ENV='test'" >> tests/.env.test
+          echo "CONTEXT_SIZE='1024'" >> tests/.env.test
+          echo "MODEL='gpt-3.5-turbo'" >> tests/.env.test
+          echo "MODEL_SUMMARIZER='gpt-3.5-turbo'" >> tests/.env.test
+          echo "MODEL_SPAM='gpt-3.5-turbo'" >> tests/.env.test
+          echo "YOUTUBE_PROXY_URL='http://fake-youtube-proxy-url'" >> tests/.env.test
+        working-directory: ./support-bot-py # Ensure this is created in the correct spot
+
+      - name: Run Pytest
+        run: poetry run pytest tests/
