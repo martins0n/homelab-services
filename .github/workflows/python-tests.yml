@@ -1,0 +1,114 @@
+name: Python Integration Tests
+
+on:
+  push:
+    branches:
+      - main
+    paths: # Only run if relevant Python files or tests change
+      - 'support-bot-py/**'
+      - '.github/workflows/python-tests.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'support-bot-py/**'
+      - '.github/workflows/python-tests.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./support-bot-py # Run commands from this directory
+
+    services:
+      # This workflow assumes an external Supabase test instance is provided via secrets.
+      # If you were to use a Dockerized Postgres service:
+      # postgres:
+      #   image: supabase/postgres:15.1.0.118 # Or your specific version
+      #   env:
+      #     POSTGRES_USER: testuser
+      #     POSTGRES_PASSWORD: testpassword
+      #     POSTGRES_DB: testdb
+      #   ports:
+      #     - 5432:5432
+      #   options: >-
+      #     --health-cmd pg_isready
+      #     --health-interval 10s
+      #     --health-timeout 5s
+      #     --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11' # Ensure this matches your pyproject.toml
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: '1.8.2' # Or your desired Poetry version
+          virtualenvs-create: true
+          virtualenvs-in-project: true # Recommended for CI caching
+
+      - name: Load cached venv
+        id: cached-poetry-dependencies
+        uses: actions/cache@v3
+        with:
+          path: ./support-bot-py/.venv # Path where venv is created
+          key: venv-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('**/poetry.lock') }}
+
+      - name: Install dependencies
+        if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
+        run: poetry install --no-interaction --no-root
+
+      # This step is an EXAMPLE if you were using a local Dockerized Postgres service.
+      # It would need the TEST_DATABASE_URL_IS_LOCAL_SERVICE env var to be true.
+      # For an external Supabase instance, ensure the schema is managed there.
+      - name: Initialize Database Schema (Example for local Postgres service)
+        if: false # Disabled by default, enable if using a local service and need to init schema here
+        env:
+          PGPASSWORD: testpassword # Example password for local service
+          TEST_DB_HOST: localhost # Or the service name, e.g., postgres
+          TEST_DB_USER: testuser
+          TEST_DB_NAME: testdb
+        run: |
+          psql -h $TEST_DB_HOST -U $TEST_DB_USER -d $TEST_DB_NAME -p 5432 -a -f tests/sql/init_db.sql
+          echo "Database initialization script executed."
+
+      - name: Run tests
+        env:
+          # For external Supabase test instance (ensure these secrets are set in GitHub repo settings)
+          TEST_DATABASE_URL: ${{ secrets.TEST_SUPABASE_DB_URL }}
+          TEST_DATABASE_KEY: ${{ secrets.TEST_SUPABASE_ANON_KEY }}
+
+          # Dummy values for other settings, as tests primarily use mocks
+          TEST_OPENAI_API_KEY: "dummy_openai_key_tests_are_mocked"
+          TELEGRAM_TOKEN: "dummy_telegram_token_tests_are_mocked"
+          X_TELEGRAM_BOT_HEADER: "dummy_header_tests_are_mocked"
+          SUMMARY_QUEUE_URL: "dummy_sqs_url"
+          YA_API: "dummy_ya_api"
+          SPAM_LIST: "http://example.com/dummy_spam_list"
+          TELEGRAM_SPAM_BOT_TOKEN: "dummy_spam_bot_token"
+          X_TELEGRAM_SPAM_BOT_HEADER: "dummy_spam_header"
+          ENV: "test" # Critical for Settings to behave in test mode
+          YOUTUBE_PROXY_URL: "dummy_youtube_proxy"
+          # Ensure all other env vars required by your Settings class are listed here
+        run: |
+          poetry run pytest tests/
+
+      # Optional: Upload test results (configure pytest for JUnit XML output)
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: pytest-results-${{ runner.os }}
+          path: support-bot-py/junit/test-results.xml # Path relative to repo root
+          # To enable JUnit XML, add to support-bot-py/pyproject.toml:
+          # [tool.pytest.ini_options]
+          # junit_family = "xunit2"
+          # addopts = "-ra --junitxml=junit/test-results.xml"
+          # And ensure the support-bot-py/junit/ directory can be created.
