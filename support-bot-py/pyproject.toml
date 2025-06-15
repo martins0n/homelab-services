@@ -6,7 +6,7 @@ authors = ["martins0n <33594071+martins0n@users.noreply.github.com>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = "^3.10"
+python = ">=3.10,<3.14"
 fastapi = {extras = ["standard"], version = "^0.114.0"}
 openai = "^1.44.0"
 httpx = "^0.27.2"
@@ -16,7 +16,7 @@ tiktoken = "^0.7.0"
 pydantic-settings = "^2.4.0"
 langchain = "<0.2.0"
 goose3 = "^3.1.19"
-youtube-transcript-api = "^0.6.2"
+youtube-transcript-api = "1.1.0"
 
 
 [tool.poetry.group.dev.dependencies]
