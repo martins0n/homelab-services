@@ -32,7 +32,6 @@ def get_transcript_summary(req: str):
     trans = YouTubeTranscriptApi.get_transcript(
         video_id, languages=["ru", "en"],
         proxies=proxies,
-        cookies=None
     )
 
     full_text = " ".join(t["text"] for t in trans)
