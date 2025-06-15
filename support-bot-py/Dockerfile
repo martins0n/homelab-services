@@ -17,3 +17,5 @@ RUN poetry install --no-dev
 
 
 EXPOSE 8000
+
+CMD ["poetry", "run", "fastapi", "run", "app.py"]
