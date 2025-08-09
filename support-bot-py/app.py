@@ -1,12 +1,13 @@
 import asyncio
 import re
-from typing import Annotated
+from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI
 from loguru import logger
 from openai import AsyncOpenAI
 
 from ban_bot.ban_bot import router as ban_bot_router
+from news_scheduler import NewsScheduler
 from repository import Message, MessageRepository
 from schemas import TelegramMessage, TelegramRequest
 from settings import Settings
@@ -17,7 +18,22 @@ from youtube import get_transcript_summary
 
 settings = Settings()
 
-app = FastAPI()
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    """Manage application lifespan - startup and shutdown events"""
+    # Startup
+    logger.info("Starting news scheduler...")
+    await news_scheduler.start()
+    
+    yield
+    
+    # Shutdown
+    logger.info("Stopping news scheduler...")
+    await news_scheduler.stop()
+
+
+app = FastAPI(lifespan=lifespan)
 
 app.include_router(ban_bot_router)
 
@@ -29,6 +45,8 @@ message_repository = MessageRepository()
 
 openai = AsyncOpenAI(api_key=settings.openai_api_key)
 
+news_scheduler = NewsScheduler(telegram_bot, settings)
+
 
 async def handle_echo(chat_id, matched):
     logger.info(f"Received /echo command with message: {matched}")
@@ -37,9 +55,17 @@ async def handle_echo(chat_id, matched):
 
 async def handle_start(chat_id):
     logger.info("Received /start command")
-    await telegram_bot.send_message(
-        chat_id, "Hello! I'm a bot. Send me a message and I'll echo it back to you."
+    message = (
+        "Hello\\! I'm a support bot with the following commands:\n\n"
+        "💬 *Regular chat* \\- just send me a message\n"
+        "🔄 /echo \\<text\\> \\- echo your message\n\n"
+        "📄 *Other Commands:*\n"
+        "📝 /summary \\<text\\> \\- summarize text\n"
+        "🌐 /summary\\_url \\<url\\> \\- summarize article from URL\n"
+        "📺 /summary\\_youtube \\<url\\> \\- summarize YouTube video\n"
+        "🤖 /prompt \\<text\\> \\- direct OpenAI prompt"
     )
+    await telegram_bot.send_message(chat_id, message)
 
 
 async def handle_summary_youtube(chat_id, matched):
@@ -127,7 +153,6 @@ async def handle_prompt(chat_id, matched):
     logger.info(f"Prompt response: {response}")
     prompt_response = response.choices[0].message.content
     await telegram_bot.send_message(chat_id, prompt_response)
-
 
 async def handle_message(request: TelegramRequest):
     msg = request.message

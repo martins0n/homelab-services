@@ -1,3 +1,6 @@
 .ruff_cache
 .env
 __pycache__
+*.pickle
+*.json
+*.log
