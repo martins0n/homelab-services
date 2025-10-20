@@ -1,0 +1,10 @@
+version: '3.8'
+
+services:
+  graph-telegram:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - 8083:8080
