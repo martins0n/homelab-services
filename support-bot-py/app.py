@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI
 from loguru import logger
 from openai import AsyncOpenAI
+from youtube_transcript_api import NoTranscriptFound
 
 from ban_bot.ban_bot import router as ban_bot_router
 from news_scheduler import NewsScheduler
@@ -15,6 +16,7 @@ from summarizer import summary_url
 from telegram import TelegramBot
 from utils import create_verify_token_function, filter_context_size
 from youtube import get_transcript_summary
+from youtube_transcript import process_youtube_transcript
 
 settings = Settings()
 
@@ -63,6 +65,7 @@ async def handle_start(chat_id):
         "📝 /summary \\<text\\> \\- summarize text\n"
         "🌐 /summary\\_url \\<url\\> \\- summarize article from URL\n"
         "📺 /summary\\_youtube \\<url\\> \\- summarize YouTube video\n"
+        "🎬 /youtube\\_transcript \\<url\\> \\- get transcript with Telegraph pages\n"
         "🤖 /prompt \\<text\\> \\- direct OpenAI prompt"
     )
     await telegram_bot.send_message(chat_id, message)
@@ -73,6 +76,39 @@ async def handle_summary_youtube(chat_id, matched):
     url = re.search(r"(https?://[^\s]+)", matched).group(0)
     summary_text = await asyncio.to_thread(get_transcript_summary, url)
     await telegram_bot.send_message(chat_id, f"Summary {url}:\n\n{summary_text}")
+
+
+async def handle_youtube_transcript(chat_id, matched):
+    """Handler for /youtube_transcript command"""
+    logger.info(f"Received /youtube_transcript command with URL: {matched}")
+
+    try:
+        url = re.search(r"(https?://[^\s]+)", matched).group(0)
+
+        await telegram_bot.send_message(chat_id, "🎬 Processing YouTube video...")
+
+        result = await process_youtube_transcript(url)
+
+        # Format response
+        message_parts = [
+            f"YouTube Transcription Complete (Video: {result['video_id']})",
+            f"Original Language: {result['original_language']}"
+        ]
+
+        if result.get('transcript_url'):
+            message_parts.append(f"📄 Full Transcript: {result['transcript_url']}")
+        if result.get('summary_url'):
+            message_parts.append(f"📝 Summary: {result['summary_url']}")
+
+        message_parts.append(f"\nSummary:\n{result['summary_text']}")
+
+        await telegram_bot.send_message(chat_id, "\n\n".join(message_parts))
+
+    except NoTranscriptFound:
+        await telegram_bot.send_message(chat_id, "❌ No transcript available for this video.")
+    except Exception as e:
+        logger.error(f"Error in youtube_transcript: {e}")
+        await telegram_bot.send_message(chat_id, f"❌ Error: {str(e)}")
 
 
 async def handle_default(msg: TelegramMessage):
@@ -167,6 +203,9 @@ async def handle_message(request: TelegramRequest):
     elif text.startswith("/summary_url"):
         matched = re.match(r"/summary_url (.+)", text).group(1)
         await handle_summary_url(chat_id, matched)
+    elif text.startswith("/youtube_transcript"):
+        matched = re.match(r"/youtube_transcript (.+)", text).group(1)
+        await handle_youtube_transcript(chat_id, matched)
     elif text.startswith("/summary_youtube"):
         matched = re.match(r"/summary_youtube (.+)", text).group(1)
         await handle_summary_youtube(chat_id, matched)
