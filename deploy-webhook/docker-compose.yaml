@@ -15,7 +15,7 @@ services:
   status:
     image: nginx:alpine
     ports:
-      - "9001:80"
+      - "9002:80"
     volumes:
       - status_data:/usr/share/nginx/html:ro
     restart: unless-stopped
