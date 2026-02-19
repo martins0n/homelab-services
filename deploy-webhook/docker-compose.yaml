@@ -1,8 +1,6 @@
 services:
   webhook:
     build: .
-    ports:
-      - "9000:9000"
     env_file: .env
     volumes:
       - ./hooks.json:/etc/webhook/hooks.json:ro
@@ -12,12 +10,15 @@ services:
       - status_data:/status
     restart: unless-stopped
 
-  status:
+  nginx:
     image: nginx:alpine
     ports:
-      - "9002:80"
+      - "9000:80"
     volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
       - status_data:/usr/share/nginx/html:ro
+    depends_on:
+      - webhook
     restart: unless-stopped
 
 volumes:
