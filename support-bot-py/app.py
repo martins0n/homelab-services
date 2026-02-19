@@ -58,15 +58,14 @@ async def handle_echo(chat_id, matched):
 async def handle_start(chat_id):
     logger.info("Received /start command")
     message = (
-        "Hello\\! I'm a support bot with the following commands:\n\n"
-        "💬 *Regular chat* \\- just send me a message\n"
-        "🔄 /echo \\<text\\> \\- echo your message\n\n"
-        "📄 *Other Commands:*\n"
-        "📝 /summary \\<text\\> \\- summarize text\n"
-        "🌐 /summary\\_url \\<url\\> \\- summarize article from URL\n"
-        "📺 /summary\\_youtube \\<url\\> \\- summarize YouTube video\n"
-        "🎬 /youtube\\_transcript \\<url\\> \\- get transcript with Telegraph pages\n"
-        "🤖 /prompt \\<text\\> \\- direct OpenAI prompt"
+        "echo - Echo your message\n"
+        "summary - Summarize text\n"
+        "summary_url - Summarize article from URL\n"
+        "summary_youtube - Summarize YouTube video\n"
+        "sy - Summarize YouTube video (shortcut)\n"
+        "youtube_transcript - Get transcript with Telegraph pages\n"
+        "yt - Get transcript with Telegraph pages (shortcut)\n"
+        "prompt - Direct OpenAI prompt"
     )
     await telegram_bot.send_message(chat_id, message)
 
@@ -203,9 +202,15 @@ async def handle_message(request: TelegramRequest):
     elif text.startswith("/summary_url"):
         matched = re.match(r"/summary_url (.+)", text).group(1)
         await handle_summary_url(chat_id, matched)
+    elif text.startswith("/yt"):
+        matched = re.match(r"/yt (.+)", text).group(1)
+        await handle_youtube_transcript(chat_id, matched)
     elif text.startswith("/youtube_transcript"):
         matched = re.match(r"/youtube_transcript (.+)", text).group(1)
         await handle_youtube_transcript(chat_id, matched)
+    elif text.startswith("/sy"):
+        matched = re.match(r"/sy (.+)", text).group(1)
+        await handle_summary_youtube(chat_id, matched)
     elif text.startswith("/summary_youtube"):
         matched = re.match(r"/summary_youtube (.+)", text).group(1)
         await handle_summary_youtube(chat_id, matched)
