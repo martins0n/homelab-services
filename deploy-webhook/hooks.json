@@ -1,0 +1,43 @@
+[
+  {
+    "id": "deploy-support-bot-py",
+    "execute-command": "/scripts/deploy.sh",
+    "command-working-directory": "/scripts",
+    "pass-arguments-to-command": [
+      { "source": "string", "name": "support-bot-py" }
+    ],
+    "response-message": "Deploying support-bot-py...",
+    "trigger-rule": {
+      "and": [
+        {
+          "match": {
+            "type": "payload-hmac-sha256",
+            "secret": "{{ .Env.WEBHOOK_SECRET }}",
+            "parameter": { "source": "header", "name": "X-Hub-Signature-256" }
+          }
+        },
+        {
+          "match": {
+            "type": "value",
+            "value": "completed",
+            "parameter": { "source": "payload", "name": "action" }
+          }
+        },
+        {
+          "match": {
+            "type": "value",
+            "value": "success",
+            "parameter": { "source": "payload", "name": "workflow_run.conclusion" }
+          }
+        },
+        {
+          "match": {
+            "type": "value",
+            "value": "main",
+            "parameter": { "source": "payload", "name": "workflow_run.head_branch" }
+          }
+        }
+      ]
+    }
+  }
+]
