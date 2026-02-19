@@ -34,6 +34,7 @@ class GmailService:
     
     def __init__(self):
         self.service = None
+        self.creds = None
         self.openai_client = AsyncOpenAI(api_key=settings.openai_api_key)
     
     async def _authenticate(self):
@@ -58,7 +59,7 @@ class GmailService:
         if not creds or not creds.valid:
             if creds and creds.expired and creds.refresh_token:
                 logger.info("Refreshing expired Gmail token")
-                creds.refresh(Request())
+                await asyncio.to_thread(creds.refresh, Request())
                 
                 # Save refreshed token to file if it exists
                 if os.path.exists(self.TOKEN_FILE):
@@ -68,6 +69,7 @@ class GmailService:
             else:
                 raise Exception("Invalid Gmail credentials. Please run goo.py to authenticate or set gmail_token_base64 in settings.")
         
+        self.creds = creds
         self.service = build('gmail', 'v1', credentials=creds)
         logger.info("Gmail service authenticated successfully")
 
@@ -75,7 +77,12 @@ class GmailService:
         """Fetch emails from the last N days"""
         if not self.service:
             await self._authenticate()
-        
+
+        # Always proactively refresh before making API calls
+        if self.creds and self.creds.expired and self.creds.refresh_token:
+            logger.info("Proactively refreshing expired Gmail token before fetch")
+            await asyncio.to_thread(self.creds.refresh, Request())
+
         # Calculate date N days ago
         date_filter = datetime.now() - timedelta(days=days)
         query = f"after:{date_filter.strftime('%Y/%m/%d')}"
@@ -298,18 +305,29 @@ class GmailService:
         
         return filtered_links[:10]  # Limit to 10 links per email
 
+    EXCLUDED_SENDERS = {
+        'no-reply@accounts.google.com',
+        'noreply@accounts.google.com',
+        'classroomdirecto@google.com',
+        'no-reply@classroom.google.com',
+    }
+
     def aggregate_by_sender(self, emails: List[GmailEmail]) -> Dict[str, List[GmailEmail]]:
-        """Group emails by sender"""
+        """Group emails by sender, excluding noise senders"""
         aggregated = defaultdict(list)
-        
+
         for email in emails:
             # Clean sender email (extract just email part)
             sender_clean = email.sender
             if '<' in sender_clean and '>' in sender_clean:
                 sender_clean = sender_clean.split('<')[1].split('>')[0]
-            
+
+            if sender_clean.lower() in self.EXCLUDED_SENDERS:
+                logger.info(f"Skipping excluded sender: {sender_clean}")
+                continue
+
             aggregated[sender_clean].append(email)
-        
+
         logger.info(f"Aggregated emails from {len(aggregated)} unique senders")
         return dict(aggregated)
 
