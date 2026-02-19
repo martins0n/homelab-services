@@ -12,7 +12,7 @@
         {
           "match": {
             "type": "payload-hmac-sha256",
-            "secret": "{{ .Env.WEBHOOK_SECRET }}",
+            "secret": "$WEBHOOK_SECRET",
             "parameter": { "source": "header", "name": "X-Hub-Signature-256" }
           }
         },
