@@ -12,7 +12,7 @@ def get_youtube_id(url):
     youtube_regex = (
         r'(https?://)?(www\.)?'
         '(youtube|youtu|youtube-nocookie)\.(com|be)/'
-        '(watch\?v=|embed/|v/|.+\?v=)?([^&=%\?]{11})'
+        '(watch\?v=|embed/|v/|live/|.+\?v=)?([^&=%\?]{11})'
     )
     
     match = re.search(youtube_regex, url)
