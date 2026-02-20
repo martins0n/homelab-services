@@ -1,30 +1,57 @@
 #!/bin/sh
 SERVICE="$1"
 COMPOSE_FILE="/homelab/$SERVICE/docker-compose.yaml"
-STATUS_FILE="/status/$SERVICE.html"
+STATUS_DIR="/status"
+STATUS_FILE="$STATUS_DIR/$SERVICE.json"
 TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
 
 write_status() {
-  mkdir -p /status
-  cat > "$STATUS_FILE" <<EOF
-<!DOCTYPE html><html><head><title>$SERVICE deploy</title>
+  mkdir -p "$STATUS_DIR"
+  printf '{"service":"%s","status":"%s","time":"%s"}\n' \
+    "$SERVICE" "$1" "$TIMESTAMP" > "$STATUS_FILE"
+  generate_index
+}
+
+generate_index() {
+  ROWS=""
+  for f in "$STATUS_DIR"/*.json; do
+    [ -f "$f" ] || continue
+    SVC=$(awk -F'"' '{print $4}' "$f")
+    STATUS=$(awk -F'"' '{print $8}' "$f")
+    TIME=$(awk -F'"' '{print $12}' "$f")
+    case "$STATUS" in
+      success*) COLOR="ok" ;;
+      fail*)    COLOR="fail" ;;
+      *)        COLOR="deploying" ;;
+    esac
+    ROWS="${ROWS}<tr><td>${SVC}</td><td class='${COLOR}'>${STATUS}</td><td>${TIME}</td></tr>"
+  done
+  UPDATED=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+  cat > "$STATUS_DIR/index.html" <<EOF
+<!DOCTYPE html><html><head><title>Deploy Status</title>
 <meta http-equiv="refresh" content="30">
 <style>
-body{font-family:monospace;padding:2rem;background:#111;color:#eee}
-.ok{color:#4caf50}.fail{color:#f44336}
+body{font-family:monospace;padding:2rem;background:#111;color:#eee;max-width:800px}
+h2{margin-bottom:.25rem}
+p{color:#666;font-size:.85rem;margin:.25rem 0 1rem}
+table{border-collapse:collapse;width:100%}
+th,td{padding:.6rem 1rem;text-align:left;border-bottom:1px solid #222}
+th{color:#555;font-size:.8rem;text-transform:uppercase}
+.ok{color:#4caf50}.fail{color:#f44336}.deploying{color:#ff9800}
 </style></head><body>
-<h2>$SERVICE</h2>
-<p>Status: <span class="$1"><strong>$2</strong></span></p>
-<p>Time: $TIMESTAMP</p>
-</body></html>
+<h2>Deploy Status</h2>
+<p>Auto-refreshes every 30s &middot; Last updated: $UPDATED</p>
+<table><tr><th>Service</th><th>Status</th><th>Time</th></tr>
+${ROWS}
+</table></body></html>
 EOF
 }
 
-trap 'write_status fail "failed ✗"' ERR
+trap 'write_status "failed ✗"' ERR
 set -e
 
-write_status ok "deploying..."
+write_status "deploying..."
 echo "[$SERVICE] Starting deploy at $TIMESTAMP"
 docker compose -f "$COMPOSE_FILE" up -d --pull always
-write_status ok "success ✓"
+write_status "success ✓"
 echo "[$SERVICE] Deploy complete at $TIMESTAMP"
