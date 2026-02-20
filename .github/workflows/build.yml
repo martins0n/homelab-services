@@ -38,6 +38,8 @@ jobs:
             IMAGE_ID=ghcr.io/${{ github.repository }}/${{ matrix.dockerfile.name }}
             docker buildx build \
               --platform linux/amd64,linux/arm64 \
+              --cache-from type=registry,ref=$IMAGE_ID:cache \
+              --cache-to type=registry,ref=$IMAGE_ID:cache,mode=max \
               --tag $IMAGE_ID:latest \
               --tag $IMAGE_ID:${{ github.sha }} \
               --push \
