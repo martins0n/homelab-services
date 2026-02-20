@@ -29,7 +29,6 @@ generate_index() {
   UPDATED=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
   cat > "$STATUS_DIR/index.html" <<EOF
 <!DOCTYPE html><html><head><title>Deploy Status</title>
-<meta http-equiv="refresh" content="30">
 <style>
 body{font-family:monospace;padding:2rem;background:#111;color:#eee;max-width:800px}
 h2{margin-bottom:.25rem}
@@ -40,7 +39,7 @@ th{color:#555;font-size:.8rem;text-transform:uppercase}
 .ok{color:#4caf50}.fail{color:#f44336}.deploying{color:#ff9800}
 </style></head><body>
 <h2>Deploy Status</h2>
-<p>Auto-refreshes every 30s &middot; Last updated: $UPDATED</p>
+<p>Last deploy: $UPDATED</p>
 <table><tr><th>Service</th><th>Status</th><th>Time</th></tr>
 ${ROWS}
 </table></body></html>
