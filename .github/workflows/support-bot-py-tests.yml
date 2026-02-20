@@ -4,9 +4,11 @@ on:
   push:
     paths:
       - "support-bot-py/**"
+      - ".github/workflows/support-bot-py-tests.yml"
   pull_request:
     paths:
       - "support-bot-py/**"
+      - ".github/workflows/support-bot-py-tests.yml"
 
 jobs:
   test:
