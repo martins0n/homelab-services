@@ -24,7 +24,7 @@ generate_index() {
       fail*)    COLOR="fail" ;;
       *)        COLOR="deploying" ;;
     esac
-    ROWS="${ROWS}<tr><td>${SVC}</td><td class='${COLOR}'>${STATUS}</td><td>${TIME}</td></tr>"
+    ROWS="${ROWS}<tr><td>${SVC}</td><td class='${COLOR}'>${STATUS}</td><td class='utc'>${TIME}</td></tr>"
   done
   UPDATED=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
   cat > "$STATUS_DIR/index.html" <<EOF
@@ -39,10 +39,21 @@ th{color:#555;font-size:.8rem;text-transform:uppercase}
 .ok{color:#4caf50}.fail{color:#f44336}.deploying{color:#ff9800}
 </style></head><body>
 <h2>Deploy Status</h2>
-<p>Last deploy: $UPDATED</p>
+<p>Last deploy: $UPDATED &mdash; local time: <span id="lc"></span></p>
 <table><tr><th>Service</th><th>Status</th><th>Time</th></tr>
 ${ROWS}
-</table></body></html>
+</table>
+<script>
+function fmt(d){return d.toLocaleString();}
+document.querySelectorAll('td.utc').forEach(function(td){
+  var s=td.textContent.trim().replace(' UTC','Z').replace(' ','T');
+  var d=new Date(s);
+  if(!isNaN(d)){td.title=td.textContent;td.textContent=fmt(d);}
+});
+function tick(){document.getElementById('lc').textContent=fmt(new Date());}
+tick();setInterval(tick,1000);
+</script>
+</body></html>
 EOF
 }
 
