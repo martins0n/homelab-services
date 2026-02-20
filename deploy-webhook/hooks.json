@@ -1,9 +1,10 @@
 [
   {
     "id": "deploy-support-bot-py",
-    "execute-command": "/scripts/deploy.sh",
+    "execute-command": "/bin/sh",
     "command-working-directory": "/scripts",
     "pass-arguments-to-command": [
+      { "source": "string", "name": "/scripts/deploy.sh" },
       { "source": "string", "name": "support-bot-py" }
     ],
     "response-message": "Deploying support-bot-py...",
