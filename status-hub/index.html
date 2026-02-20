@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Homelab Status Hub</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0d1117;
+      color: #c9d1d9;
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 14px;
+      padding: 24px 16px;
+      min-height: 100vh;
+    }
+
+    h1 {
+      font-size: 1.4rem;
+      color: #e6edf3;
+      margin-bottom: 4px;
+    }
+
+    .subtitle {
+      color: #8b949e;
+      margin-bottom: 32px;
+      font-size: 0.85rem;
+    }
+
+    section {
+      margin-bottom: 36px;
+    }
+
+    h2 {
+      font-size: 1rem;
+      color: #8b949e;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 12px;
+      border-bottom: 1px solid #21262d;
+      padding-bottom: 6px;
+    }
+
+    .card {
+      background: #161b22;
+      border: 1px solid #21262d;
+      border-radius: 6px;
+      padding: 14px 18px;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .card.error {
+      border-color: #f4433633;
+      background: #1a1012;
+    }
+
+    .service-name {
+      flex: 1;
+      font-weight: bold;
+      color: #e6edf3;
+      min-width: 140px;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 2px 10px;
+      border-radius: 12px;
+      font-size: 0.78rem;
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .badge-ok        { background: #1a2f1a; color: #4caf50; border: 1px solid #4caf5055; }
+    .badge-fail      { background: #2f1a1a; color: #f44336; border: 1px solid #f4433655; }
+    .badge-progress  { background: #2f2510; color: #ff9800; border: 1px solid #ff980055; }
+    .badge-unknown   { background: #1e2330; color: #8b949e; border: 1px solid #30363d; }
+
+    .meta {
+      color: #8b949e;
+      font-size: 0.82rem;
+      margin-left: auto;
+      white-space: nowrap;
+    }
+
+    .uptime-bar-wrap {
+      width: 100px;
+      height: 6px;
+      background: #21262d;
+      border-radius: 3px;
+      overflow: hidden;
+    }
+
+    .uptime-bar {
+      height: 100%;
+      border-radius: 3px;
+      background: #4caf50;
+    }
+
+    .uptime-pct {
+      color: #8b949e;
+      font-size: 0.82rem;
+      min-width: 48px;
+      text-align: right;
+    }
+
+    .spinner {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      border: 2px solid #30363d;
+      border-top-color: #8b949e;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin-right: 6px;
+      vertical-align: middle;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .loading-msg {
+      color: #8b949e;
+      padding: 12px 0;
+    }
+
+    .error-msg { color: #f44336; }
+
+    a { color: #58a6ff; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    footer {
+      margin-top: 40px;
+      color: #484f58;
+      font-size: 0.78rem;
+    }
+  </style>
+</head>
+<body>
+
+<h1>Homelab Status Hub</h1>
+<p class="subtitle">Unified view of deployments &amp; uptime</p>
+
+<section>
+  <h2>Deployments</h2>
+  <div id="deploy-section">
+    <p class="loading-msg"><span class="spinner"></span>Loading deploy status…</p>
+  </div>
+</section>
+
+<section>
+  <h2>Uptime</h2>
+  <div id="uptime-section">
+    <p class="loading-msg"><span class="spinner"></span>Loading uptime status…</p>
+  </div>
+</section>
+
+<footer>
+  Updated on load &mdash;
+  <a href="https://status.lab.martins0n.com" target="_blank">Full uptime dashboard</a> &middot;
+  <a href="https://announced-sick-changing-require8-tie.martins0n.com" target="_blank">Deploy status page</a>
+</footer>
+
+<script>
+  const DEPLOY_BASE = 'https://announced-sick-changing-require8-tie.martins0n.com';
+  const UPTIME_SUMMARY = 'https://raw.githubusercontent.com/martins0n/homelab-uptime/master/history/summary.json';
+
+  // Known services on the deploy status page
+  const DEPLOY_SERVICES = ['support-bot-py'];
+
+  function badge(status) {
+    const s = (status || '').toLowerCase();
+    if (s === 'ok' || s === 'success' || s === 'deployed') return ['ok', 'OK'];
+    if (s === 'fail' || s === 'error' || s === 'failed') return ['fail', 'FAIL'];
+    if (s === 'in-progress' || s === 'deploying' || s === 'pending') return ['progress', status];
+    return ['unknown', status || '?'];
+  }
+
+  function formatTime(iso) {
+    if (!iso) return '';
+    try {
+      return new Date(iso).toLocaleString();
+    } catch { return iso; }
+  }
+
+  // ── Deploy section ────────────────────────────────────────────────────────
+
+  async function fetchDeploy() {
+    const results = await Promise.allSettled(
+      DEPLOY_SERVICES.map(svc =>
+        fetch(`${DEPLOY_BASE}/${svc}.json`).then(r => {
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          return r.json();
+        })
+      )
+    );
+
+    const section = document.getElementById('deploy-section');
+    section.innerHTML = '';
+
+    let anySuccess = false;
+
+    results.forEach((result, i) => {
+      const svcName = DEPLOY_SERVICES[i];
+      const card = document.createElement('div');
+      card.className = 'card';
+
+      if (result.status === 'fulfilled') {
+        anySuccess = true;
+        const d = result.value;
+        const [cls, label] = badge(d.status);
+        card.innerHTML = `
+          <span class="service-name">${d.service || svcName}</span>
+          <span class="badge badge-${cls}">${label}</span>
+          <span class="meta">${formatTime(d.time)}</span>
+        `;
+      } else {
+        card.classList.add('error');
+        card.innerHTML = `
+          <span class="service-name">${svcName}</span>
+          <span class="badge badge-unknown">UNKNOWN</span>
+          <span class="meta error-msg">${result.reason}</span>
+        `;
+      }
+
+      section.appendChild(card);
+    });
+
+    if (!anySuccess && results.length === 0) {
+      section.innerHTML = '<p class="error-msg">No deploy services configured.</p>';
+    }
+  }
+
+  // ── Uptime section ────────────────────────────────────────────────────────
+
+  async function fetchUptime() {
+    const section = document.getElementById('uptime-section');
+
+    let data;
+    try {
+      const resp = await fetch(UPTIME_SUMMARY);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      data = await resp.json();
+    } catch (err) {
+      section.innerHTML = `
+        <div class="card error">
+          <span class="service-name">Uptime data unavailable</span>
+          <span class="meta error-msg">${err}</span>
+        </div>
+        <p style="margin-top:10px;color:#8b949e;font-size:0.85rem;">
+          View full dashboard: <a href="https://status.lab.martins0n.com" target="_blank">status.lab.martins0n.com</a>
+        </p>
+      `;
+      return;
+    }
+
+    if (!Array.isArray(data) || data.length === 0) {
+      section.innerHTML = '<p class="error-msg">Unexpected uptime data format.</p>';
+      return;
+    }
+
+    section.innerHTML = '';
+
+    data.forEach(svc => {
+      const isUp = (svc.status || '').toLowerCase() === 'up';
+      const pctStr = svc.uptimeDay || svc.uptime || '';
+      const pct = parseFloat(pctStr) || 0;
+      const rt = svc.time != null ? `${svc.time} ms` : '';
+
+      const card = document.createElement('div');
+      card.className = 'card';
+      card.innerHTML = `
+        <span class="service-name">${svc.name}</span>
+        <span class="badge ${isUp ? 'badge-ok' : 'badge-fail'}">${isUp ? 'UP' : 'DOWN'}</span>
+        <div class="uptime-bar-wrap" title="${pctStr} uptime (today)">
+          <div class="uptime-bar" style="width:${Math.min(pct,100)}%;${!isUp ? 'background:#f44336' : ''}"></div>
+        </div>
+        <span class="uptime-pct">${pctStr}</span>
+        <span class="meta">${rt}</span>
+      `;
+      section.appendChild(card);
+    });
+  }
+
+  // ── Boot ──────────────────────────────────────────────────────────────────
+
+  Promise.allSettled([fetchDeploy(), fetchUptime()]);
+</script>
+</body>
+</html>

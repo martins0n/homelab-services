@@ -1,0 +1,19 @@
+name: Deploy status-hub to Cloudflare Pages
+
+on:
+  push:
+    paths:
+      - "status-hub/**"
+      - ".github/workflows/deploy-status-hub.yml"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy to Cloudflare Pages
+        run: npx wrangler pages deploy status-hub/ --project-name=homelab-status --commit-dirty=true
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
