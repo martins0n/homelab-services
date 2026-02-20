@@ -4,7 +4,7 @@ services:
     env_file: .env
     volumes:
       - ./hooks.json:/etc/webhook/hooks.json:ro
-      - ./deploy.sh:/scripts/deploy.sh:ro
+      - .:/deploy-webhook:ro
       - /var/run/docker.sock:/var/run/docker.sock
       - /home/orangepi/projects/homelab-services:/homelab:ro
       - status_data:/status

@@ -2,9 +2,9 @@
   {
     "id": "deploy-support-bot-py",
     "execute-command": "/bin/sh",
-    "command-working-directory": "/scripts",
+    "command-working-directory": "/deploy-webhook",
     "pass-arguments-to-command": [
-      { "source": "string", "name": "/scripts/deploy.sh" },
+      { "source": "string", "name": "/deploy-webhook/deploy.sh" },
       { "source": "string", "name": "support-bot-py" }
     ],
     "response-message": "Deploying support-bot-py...",
