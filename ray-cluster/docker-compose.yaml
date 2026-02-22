@@ -2,9 +2,9 @@ version: "3.9"
 services:
   ray-head:
     ports:
-      - "6379:6379"
-      - "8265:8265"
-      - "10001:10001"
+      - "127.0.0.1:6379:6379"
+      - "127.0.0.1:8265:8265"
+      - "127.0.0.1:10001:10001"
     env_file:
       - ../stack.env
     image: ghcr.io/martins0n/homelab-services/ray-cluster:latest

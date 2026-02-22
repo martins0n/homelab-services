@@ -7,4 +7,4 @@ services:
     image: ghcr.io/martins0n/homelab-services/hello:latest
     restart: always
     ports:
-      - 8080:80
+      - "127.0.0.1:8080:80"
