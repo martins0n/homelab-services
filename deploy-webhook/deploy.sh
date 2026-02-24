@@ -3,7 +3,16 @@ SERVICE="$1"
 COMPOSE_FILE="/homelab/$SERVICE/docker-compose.yaml"
 STATUS_DIR="/status"
 STATUS_FILE="$STATUS_DIR/$SERVICE.json"
+LOCK_FILE="/tmp/deploy-${SERVICE}.lock"
 TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+
+# Prevent concurrent deploys for the same service
+if [ -f "$LOCK_FILE" ]; then
+  echo "[$SERVICE] Deploy already in progress, skipping"
+  exit 0
+fi
+trap 'rm -f "$LOCK_FILE"' EXIT
+echo $$ > "$LOCK_FILE"
 
 write_status() {
   mkdir -p "$STATUS_DIR"
