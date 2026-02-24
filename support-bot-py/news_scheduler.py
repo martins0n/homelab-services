@@ -89,41 +89,37 @@ class NewsScheduler:
             logger.error(f"Error sending daily newsletter: {e}")
 
     async def _send_newsletter(self):
-        """Send newsletter to the configured channel"""
+        """Send newsletter to the configured channel (each sender as a separate message)"""
         channel_id = self.settings.news_channel_id
-        
+
         try:
             logger.info(f"Generating newsletter for channel {channel_id}")
-            
+
             # Fetch emails from the last N days
             emails = await self.gmail_service.fetch_emails_last_days(self.settings.news_default_days)
-            
+
             if not emails:
                 logger.info("No new emails found, skipping newsletter")
                 return
-            
+
             # Aggregate by sender
             sender_emails = self.gmail_service.aggregate_by_sender(emails)
-            
-            # Create newsletter (includes header and summary)
-            newsletter = await self.gmail_service.create_news_summary(sender_emails)
-            
-            # Send newsletter (split if too long)
-            if len(newsletter) > 4000:  # Telegram message limit
-                chunks = [newsletter[i:i+4000] for i in range(0, len(newsletter), 4000)]
-                for i, chunk in enumerate(chunks):
-                    if i == 0:
+
+            # Create newsletter messages (header + one per sender)
+            messages = await self.gmail_service.create_news_summary(sender_emails)
+
+            # Send each message separately
+            for i, message in enumerate(messages):
+                # Split individual message into chunks if it exceeds Telegram limit
+                if len(message) > 4000:
+                    chunks = [message[j:j+4000] for j in range(0, len(message), 4000)]
+                    for chunk in chunks:
                         await self.telegram_bot.send_message(channel_id, chunk)
-                    else:
-                        await self.telegram_bot.send_message(
-                            channel_id, 
-                            f"📰 Newsletter Continued...\n\n{chunk}"
-                        )
-            else:
-                await self.telegram_bot.send_message(channel_id, newsletter)
-            
-            logger.info(f"Successfully sent newsletter to channel {channel_id}")
-            
+                else:
+                    await self.telegram_bot.send_message(channel_id, message)
+
+            logger.info(f"Successfully sent newsletter ({len(messages)} messages) to channel {channel_id}")
+
         except Exception as e:
             logger.error(f"Error sending newsletter to channel {channel_id}: {e}")
             raise

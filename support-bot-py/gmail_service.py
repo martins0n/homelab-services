@@ -331,24 +331,25 @@ class GmailService:
         logger.info(f"Aggregated emails from {len(aggregated)} unique senders")
         return dict(aggregated)
 
-    async def create_news_summary(self, sender_emails: Dict[str, List[GmailEmail]]) -> str:
-        """Create newsletter with AI summaries"""
-        from newsletter_formatter import create_summary_prompt, format_newsletter
-        
-        # Create base newsletter with full email addresses and placeholders
-        newsletter = format_newsletter(sender_emails, 1)
-        
-        # Replace each placeholder with AI summary
+    async def create_news_summary(self, sender_emails: Dict[str, List[GmailEmail]]) -> List[str]:
+        """Create newsletter with AI summaries, returning a list of messages (header + one per sender)"""
+        from newsletter_formatter import create_summary_prompt, format_newsletter_header, format_sender_message
+
+        # Create header message
+        header = format_newsletter_header(sender_emails, 1)
+        messages: List[str] = [header]
+
+        # Create a separate message for each sender
         for sender, emails in sender_emails.items():
             if not emails:
                 continue
-                
+
             logger.info(f"Creating summary for {sender} with {len(emails)} emails")
-            
+
             try:
                 # Create prompt for AI
                 prompt_content = create_summary_prompt(sender, emails)
-                
+
                 # Get AI summary
                 response = await self.openai_client.chat.completions.create(
                     model=settings.model_summarizer,
@@ -399,20 +400,20 @@ Only respond with "No significant content found in these emails" if the emails c
 """
                         },
                         {
-                            "role": "user", 
+                            "role": "user",
                             "content": prompt_content
                         }
                     ],
                     max_tokens=4000
                 )
-                
+
                 summary = response.choices[0].message.content.strip()
-                
-                # Replace first occurrence of placeholder with summary
-                newsletter = newsletter.replace("SUMMARY_PLACEHOLDER", summary, 1)
-                
+                sender_msg = format_sender_message(sender, len(emails), summary)
+                messages.append(sender_msg)
+
             except Exception as e:
                 logger.error(f"Error creating summary for {sender}: {e}")
-                newsletter = newsletter.replace("SUMMARY_PLACEHOLDER", "Error generating summary", 1)
-        
-        return newsletter
+                sender_msg = format_sender_message(sender, len(emails), "Error generating summary")
+                messages.append(sender_msg)
+
+        return messages
