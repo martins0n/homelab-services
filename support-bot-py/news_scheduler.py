@@ -1,4 +1,5 @@
 import asyncio
+from collections import OrderedDict
 from datetime import datetime
 from typing import Optional
 
@@ -7,6 +8,9 @@ from loguru import logger
 from gmail_service import GmailService
 from settings import Settings
 from telegram import TelegramBot
+
+# Max number of message_ids to remember (LRU eviction beyond this)
+_SENT_CACHE_MAXSIZE = 2048
 
 
 class NewsScheduler:
@@ -17,6 +21,8 @@ class NewsScheduler:
         self.is_running = False
         self._task: Optional[asyncio.Task] = None
         self._last_sent_date: Optional[str] = None
+        # LRU cache of already-sent email message_ids
+        self._sent_ids: OrderedDict[str, None] = OrderedDict()
 
     async def start(self):
         """Start the news scheduler"""
@@ -102,14 +108,22 @@ class NewsScheduler:
                 logger.info("No new emails found, skipping newsletter")
                 return
 
+            # Filter out already-sent emails
+            new_emails = [e for e in emails if e.message_id not in self._sent_ids]
+            logger.info(f"Filtered {len(emails) - len(new_emails)} already-sent emails, {len(new_emails)} new")
+
+            if not new_emails:
+                logger.info("All emails already sent previously, skipping newsletter")
+                return
+
             # Aggregate by sender
-            sender_emails = self.gmail_service.aggregate_by_sender(emails)
+            sender_emails = self.gmail_service.aggregate_by_sender(new_emails)
 
             # Create newsletter messages (header + one per sender)
             messages = await self.gmail_service.create_news_summary(sender_emails)
 
             # Send each message separately
-            for i, message in enumerate(messages):
+            for message in messages:
                 # Split individual message into chunks if it exceeds Telegram limit
                 if len(message) > 4000:
                     chunks = [message[j:j+4000] for j in range(0, len(message), 4000)]
@@ -117,6 +131,13 @@ class NewsScheduler:
                         await self.telegram_bot.send_message(channel_id, chunk)
                 else:
                     await self.telegram_bot.send_message(channel_id, message)
+
+            # Mark all new emails as sent (LRU eviction if over limit)
+            for e in new_emails:
+                self._sent_ids[e.message_id] = None
+                self._sent_ids.move_to_end(e.message_id)
+            while len(self._sent_ids) > _SENT_CACHE_MAXSIZE:
+                self._sent_ids.popitem(last=False)
 
             logger.info(f"Successfully sent newsletter ({len(messages)} messages) to channel {channel_id}")
 

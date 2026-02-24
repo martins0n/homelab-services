@@ -2,7 +2,7 @@ import asyncio
 import base64
 import os
 import pickle
-from collections import OrderedDict, defaultdict
+from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Dict, List
 
@@ -32,14 +32,10 @@ class GmailEmail:
 class GmailService:
     TOKEN_FILE = 'token.pickle'
     
-    SUMMARY_CACHE_MAXSIZE = 128
-
     def __init__(self):
         self.service = None
         self.creds = None
         self.openai_client = AsyncOpenAI(api_key=settings.openai_api_key)
-        # LRU cache for AI summaries: key = frozenset of message_ids, value = summary text
-        self._summary_cache: OrderedDict[frozenset, str] = OrderedDict()
     
     async def _authenticate(self):
         """Authenticate with Gmail API using token.pickle or base64 encoded token"""
@@ -350,19 +346,6 @@ class GmailService:
 
             logger.info(f"Creating summary for {sender} with {len(emails)} emails")
 
-            # Build cache key from message IDs
-            cache_key = frozenset(e.message_id for e in emails)
-
-            # Check LRU cache
-            if cache_key in self._summary_cache:
-                summary = self._summary_cache[cache_key]
-                # Move to end (most recently used)
-                self._summary_cache.move_to_end(cache_key)
-                logger.info(f"Cache hit for {sender}, skipping OpenAI call")
-                sender_msg = format_sender_message(sender, len(emails), summary)
-                messages.append(sender_msg)
-                continue
-
             try:
                 # Create prompt for AI
                 prompt_content = create_summary_prompt(sender, emails)
@@ -425,12 +408,6 @@ Only respond with "No significant content found in these emails" if the emails c
                 )
 
                 summary = response.choices[0].message.content.strip()
-
-                # Store in LRU cache
-                self._summary_cache[cache_key] = summary
-                if len(self._summary_cache) > self.SUMMARY_CACHE_MAXSIZE:
-                    self._summary_cache.popitem(last=False)  # evict oldest
-
                 sender_msg = format_sender_message(sender, len(emails), summary)
                 messages.append(sender_msg)
 
