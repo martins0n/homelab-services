@@ -122,15 +122,15 @@ class NewsScheduler:
             # Create newsletter messages (header + one per sender)
             messages = await self.gmail_service.create_news_summary(sender_emails)
 
-            # Send each message separately
+            # Send each message separately (Telegram HTML)
             for message in messages:
                 # Split individual message into chunks if it exceeds Telegram limit
                 if len(message) > 4000:
                     chunks = [message[j:j+4000] for j in range(0, len(message), 4000)]
                     for chunk in chunks:
-                        await self.telegram_bot.send_message(channel_id, chunk)
+                        await self.telegram_bot.send_message(channel_id, chunk, parse_mode="HTML")
                 else:
-                    await self.telegram_bot.send_message(channel_id, message)
+                    await self.telegram_bot.send_message(channel_id, message, parse_mode="HTML")
 
             # Mark all new emails as sent (LRU eviction if over limit)
             for e in new_emails:

@@ -38,30 +38,32 @@ def format_newsletter(emails_by_sender: dict, days_back: int) -> str:
 
 def format_newsletter_header(emails_by_sender: dict, days_back: int) -> str:
     """
-    Create just the header part of the newsletter (without per-sender details)
+    Create just the header part of the newsletter (Telegram HTML)
     """
     if not emails_by_sender:
-        return "📰 Daily Newsletter\n\nNo new emails found."
+        return "<b>📰 Daily Newsletter</b>\n\nNo new emails found."
 
     total_emails = sum(len(emails) for emails in emails_by_sender.values())
     sender_count = len(emails_by_sender)
     current_date = datetime.now().strftime('%Y-%m-%d %H:%M')
 
-    return f"""📰 Daily Newsletter
-🕘 {current_date}
-📊 {total_emails} emails from {sender_count} senders
-📅 Last {days_back} day(s)"""
+    return (
+        f"<b>📰 Daily Newsletter</b>\n"
+        f"🕘 {current_date}\n"
+        f"📊 {total_emails} emails from {sender_count} senders\n"
+        f"📅 Last {days_back} day(s)"
+    )
 
 
 def format_sender_message(sender: str, email_count: int, summary: str) -> str:
     """
-    Format a single sender's summary as a standalone message
+    Format a single sender's summary as a standalone Telegram HTML message
     """
     clean_sender = sender
     if '<' in sender and '>' in sender:
         clean_sender = sender.split('<')[1].split('>')[0]
 
-    return f"📧 {clean_sender} ({email_count} emails):\n\n{summary}"
+    return f"<b>📧 {clean_sender}</b> ({email_count} emails)\n\n{summary}"
 
 
 def create_summary_prompt(sender: str, emails: list) -> str:
@@ -83,12 +85,9 @@ def create_summary_prompt(sender: str, emails: list) -> str:
         
         content += f"Content:\n{email_body}\n"
         
-        # Include links if they seem news-related
+        # Include all extracted links for the AI to reference
         if email.links:
-            news_links = [link for link in email.links if any(domain in link.lower() 
-                         for domain in ['news', 'reuters', 'bloomberg', 'techcrunch', 'github', 'blog'])]
-            if news_links:
-                content += f"Relevant Links: {', '.join(news_links[:3])}\n"
+            content += f"Links: {', '.join(email.links[:5])}\n"
         
         content += "\n" + "="*50 + "\n\n"
     

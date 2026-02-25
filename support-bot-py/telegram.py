@@ -6,14 +6,16 @@ class TelegramBot:
     def __init__(self, token: str):
         self.token = token
 
-    async def send_message(self, chat_id: int, text: str):
+    async def send_message(self, chat_id: int, text: str, parse_mode: str = None):
         async with AsyncClient(
             base_url=f"https://api.telegram.org/bot{self.token}"
         ) as client:
             payload = {
-                "chat_id": chat_id, 
+                "chat_id": chat_id,
                 "text": text
             }
+            if parse_mode:
+                payload["parse_mode"] = parse_mode
             
             result = await client.post(
                 "/sendMessage",
