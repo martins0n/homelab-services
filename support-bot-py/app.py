@@ -89,19 +89,22 @@ async def handle_youtube_transcript(chat_id, matched):
         result = await process_youtube_transcript(url)
 
         # Format response
+        video_id = result['video_id']
+        youtube_url = f"https://www.youtube.com/watch?v={video_id}"
         message_parts = [
-            f"YouTube Transcription Complete (Video: {result['video_id']})",
+            f"<b>YouTube Transcription Complete</b> (Video: {video_id})",
+            f"🔗 <a href=\"{youtube_url}\">YouTube Link</a>",
             f"Original Language: {result['original_language']}"
         ]
 
         if result.get('transcript_url'):
-            message_parts.append(f"📄 Full Transcript: {result['transcript_url']}")
+            message_parts.append(f"📄 <a href=\"{result['transcript_url']}\">Full Transcript</a>")
         if result.get('summary_url'):
-            message_parts.append(f"📝 Summary: {result['summary_url']}")
+            message_parts.append(f"📝 <a href=\"{result['summary_url']}\">Summary</a>")
 
-        message_parts.append(f"\nSummary:\n{result['summary_text']}")
+        message_parts.append(f"\n<b>Summary:</b>\n{result['summary_text']}")
 
-        await telegram_bot.send_message(chat_id, "\n\n".join(message_parts))
+        await telegram_bot.send_message(chat_id, "\n".join(message_parts), parse_mode="HTML")
 
     except NoTranscriptFound:
         await telegram_bot.send_message(chat_id, "❌ No transcript available for this video.")
