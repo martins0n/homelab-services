@@ -175,8 +175,9 @@ class GmailService:
 
     def _extract_body(self, payload) -> str:
         """Extract text body from email payload with detailed debugging"""
-        body = ""
-        
+        plain_text = ""
+        html_text = ""
+
         # Debug: Log email structure
         logger.info(f"Email structure - mimeType: {payload.get('mimeType')}")
         logger.info(f"Has parts: {'parts' in payload}")
@@ -184,83 +185,91 @@ class GmailService:
             logger.info(f"Number of parts: {len(payload['parts'])}")
             for i, part in enumerate(payload['parts']):
                 logger.info(f"Part {i}: mimeType={part.get('mimeType')}, has_body={bool(part.get('body'))}, has_data={'data' in part.get('body', {})}")
-        
+
         def extract_from_part(part, level=0):
             """Recursively extract text from email parts"""
-            nonlocal body
+            nonlocal plain_text, html_text
             indent = "  " * level
-            
+
             mime_type = part.get('mimeType', 'unknown')
             logger.debug(f"{indent}Processing part: {mime_type}")
-            
+
             if mime_type == 'text/plain' and 'data' in part.get('body', {}):
                 try:
                     data = part['body']['data']
                     decoded = base64.urlsafe_b64decode(data).decode('utf-8', errors='ignore')
                     logger.info(f"{indent}Extracted {len(decoded)} chars from text/plain")
-                    body += decoded + "\n"
+                    plain_text += decoded + "\n"
                 except Exception as e:
                     logger.warning(f"{indent}Failed to decode text/plain part: {e}")
-            
+
             elif mime_type == 'text/html' and 'data' in part.get('body', {}):
                 try:
                     data = part['body']['data']
                     html_content = base64.urlsafe_b64decode(data).decode('utf-8', errors='ignore')
                     logger.info(f"{indent}Found HTML content: {len(html_content)} chars")
-                    
+
                     # Enhanced HTML to text conversion
                     import re
                     from html import unescape
-                    
+
                     # Remove script and style elements
                     text_content = re.sub(r'<(script|style)[^>]*>.*?</\1>', '', html_content, flags=re.DOTALL | re.IGNORECASE)
-                    
+
                     # Convert common HTML elements to text
                     text_content = re.sub(r'<br[^>]*>', '\n', text_content, flags=re.IGNORECASE)
                     text_content = re.sub(r'<p[^>]*>', '\n\n', text_content, flags=re.IGNORECASE)
                     text_content = re.sub(r'</p>', '', text_content, flags=re.IGNORECASE)
                     text_content = re.sub(r'<div[^>]*>', '\n', text_content, flags=re.IGNORECASE)
                     text_content = re.sub(r'</div>', '', text_content, flags=re.IGNORECASE)
-                    
+
                     # Remove all remaining HTML tags
                     text_content = re.sub(r'<[^>]+>', ' ', text_content)
-                    
+
                     # Decode HTML entities
                     text_content = unescape(text_content)
-                    
+
                     # Clean up whitespace
                     text_content = re.sub(r'\n\s*\n', '\n\n', text_content)  # Multiple newlines to double
                     text_content = re.sub(r'[ \t]+', ' ', text_content)  # Multiple spaces to single
-                    
+
                     logger.info(f"{indent}Converted HTML to {len(text_content)} chars of text")
-                    
-                    # Only add HTML content if we don't have plain text yet
-                    if not body.strip():
-                        body += text_content + "\n"
-                        
+                    html_text += text_content + "\n"
+
                 except Exception as e:
                     logger.warning(f"{indent}Failed to decode text/html part: {e}")
-            
+
             # Check for attachment data that might contain the actual content
             elif 'attachmentId' in part.get('body', {}):
                 logger.info(f"{indent}Found attachment: {part.get('body', {}).get('attachmentId')}")
                 # Note: We'd need to fetch attachment separately, skip for now
-            
+
             # Handle nested parts
             if 'parts' in part:
                 logger.debug(f"{indent}Processing {len(part['parts'])} nested parts")
                 for nested_part in part['parts']:
                     extract_from_part(nested_part, level + 1)
-        
+
         # Start extraction
         if 'parts' in payload:
             for part in payload['parts']:
                 extract_from_part(part)
         else:
             extract_from_part(payload)
-        
-        # Clean up the extracted body
-        body = body.strip()
+
+        # Choose the best content: use plain text if it's substantial, otherwise prefer HTML
+        # Many newsletters have a stub text/plain ("View in browser") but rich HTML content
+        MIN_PLAIN_TEXT_LENGTH = 200
+        if plain_text.strip() and len(plain_text.strip()) >= MIN_PLAIN_TEXT_LENGTH:
+            body = plain_text.strip()
+            logger.info(f"Using text/plain content ({len(body)} chars)")
+        elif html_text.strip():
+            body = html_text.strip()
+            logger.info(f"Using text/html content ({len(body)} chars) - plain text too short ({len(plain_text.strip())} chars)")
+        else:
+            body = plain_text.strip()
+            logger.info(f"Falling back to text/plain content ({len(body)} chars) - no HTML available")
+
         original_length = len(body)
         
         # If still empty or very short, try to get snippet from message metadata
