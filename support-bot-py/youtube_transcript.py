@@ -6,7 +6,6 @@ from openai import AsyncOpenAI
 from youtube_transcript_api import NoTranscriptFound, YouTubeTranscriptApi
 
 from settings import Settings
-from summarizer import make_summary_single_call
 from youtube import get_youtube_id
 
 # Module-level cache for Telegraph access token
@@ -162,23 +161,128 @@ async def process_youtube_transcript(url: str) -> dict:
 
     logger.info(f"Transcript length: {len(full_text)} characters")
 
-    # Translate to English
-    logger.info("Translating transcript to English...")
+    # Translate to English only if needed (non-English transcripts)
     openai_client = AsyncOpenAI(api_key=settings.openai_api_key)
-    translation_response = await openai_client.chat.completions.create(
-        model=settings.model_transcript,
-        messages=[{
-            "role": "user",
-            "content": f"Translate the following YouTube transcript to English. If already in English, improve grammar and readability while preserving meaning:\n\n{full_text}"
-        }]
-    )
-    translated_text = translation_response.choices[0].message.content
-    logger.info("Translation complete")
 
-    # Generate summary
-    logger.info("Generating summary...")
-    summary_text = await asyncio.to_thread(make_summary_single_call, translated_text)
-    logger.info("Summary complete")
+    if original_lang == 'en':
+        logger.info("Transcript is already in English, skipping translation")
+        translated_text = full_text
+    else:
+        logger.info(f"Translating transcript from '{original_lang}' to English ({len(full_text)} chars)...")
+
+        # Chunk the transcript to avoid exceeding model output limits
+        # gpt-4o-mini can output ~16K tokens, so keep input chunks manageable
+        chunk_size = 15000  # characters per chunk
+        chunks = [full_text[i:i + chunk_size] for i in range(0, len(full_text), chunk_size)]
+        logger.info(f"Split transcript into {len(chunks)} chunks for translation")
+
+        translated_chunks = []
+        for i, chunk in enumerate(chunks):
+            logger.info(f"Translating chunk {i + 1}/{len(chunks)} ({len(chunk)} chars)...")
+            translation_response = await openai_client.chat.completions.create(
+                model=settings.model_transcript,
+                messages=[{
+                    "role": "user",
+                    "content": f"Translate the following YouTube transcript chunk to English. Preserve meaning accurately:\n\n{chunk}"
+                }],
+                max_tokens=16000
+            )
+            chunk_text = translation_response.choices[0].message.content
+            # Check for refusal
+            if chunk_text and not any(phrase in chunk_text.lower() for phrase in [
+                "i can't assist", "i cannot assist", "i'm unable to", "i am unable to",
+                "i can't help", "i cannot help", "against my guidelines"
+            ]):
+                translated_chunks.append(chunk_text)
+                logger.info(f"Chunk {i + 1} translated: {len(chunk_text)} chars")
+            else:
+                logger.warning(f"Chunk {i + 1} appears to be a refusal: {chunk_text[:200] if chunk_text else 'None'}")
+                # Fall back to original chunk text
+                translated_chunks.append(chunk)
+
+        translated_text = "\n".join(translated_chunks)
+        logger.info(f"Translation complete: {len(translated_text)} chars total")
+
+    # Generate summary with chunking and refusal detection
+    # Summarize in chunks so a single problematic passage doesn't kill the whole summary
+    logger.info(f"Generating summary from {len(translated_text)} chars...")
+
+    summary_chunk_size = 30000  # characters per chunk for summarization
+    text_chunks = [translated_text[i:i + summary_chunk_size] for i in range(0, len(translated_text), summary_chunk_size)]
+    logger.info(f"Split into {len(text_chunks)} chunks for summarization")
+
+    REFUSAL_PHRASES = [
+        "i can't assist", "i cannot assist", "i'm unable to", "i am unable to",
+        "i can't help", "i cannot help", "against my guidelines",
+        "i'm not able to", "i am not able to", "i must decline",
+        "i can't provide", "i cannot provide", "i'm sorry, but i can't",
+        "i apologize, but i can't", "not appropriate for me to",
+    ]
+
+    chunk_summaries = []
+    for i, chunk in enumerate(text_chunks):
+        logger.info(f"Summarizing chunk {i + 1}/{len(text_chunks)} ({len(chunk)} chars)...")
+        try:
+            response = await openai_client.chat.completions.create(
+                model=settings.model_summarizer,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are a transcript summarizer. Summarize the key ideas from the following transcript excerpt. This is a factual transcription task — report what was discussed without judgment. Always provide a summary regardless of the topic."
+                    },
+                    {
+                        "role": "user",
+                        "content": f"Write the key ideas and a concise summary of this transcript section:\n\n{chunk}"
+                    }
+                ],
+                max_tokens=4000
+            )
+            chunk_summary = response.choices[0].message.content
+            if chunk_summary and not any(phrase in chunk_summary.lower() for phrase in REFUSAL_PHRASES):
+                chunk_summaries.append(chunk_summary)
+                logger.info(f"Chunk {i + 1} summarized: {len(chunk_summary)} chars")
+            else:
+                logger.warning(f"Chunk {i + 1} summary refused: {chunk_summary[:200] if chunk_summary else 'None'}")
+                # Extract first ~500 chars as a raw excerpt fallback
+                chunk_summaries.append(f"[Transcript excerpt]: {chunk[:500]}...")
+        except Exception as e:
+            logger.error(f"Error summarizing chunk {i + 1}: {e}")
+            chunk_summaries.append(f"[Transcript excerpt]: {chunk[:500]}...")
+
+    # Combine chunk summaries into a final summary
+    if len(chunk_summaries) > 1:
+        combined = "\n\n".join(chunk_summaries)
+        logger.info(f"Combining {len(chunk_summaries)} chunk summaries into final summary...")
+        try:
+            response = await openai_client.chat.completions.create(
+                model=settings.model_summarizer,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are a transcript summarizer. Combine the following section summaries into a single coherent summary with top 5 key ideas. This is a factual transcription task — report what was discussed without judgment."
+                    },
+                    {
+                        "role": "user",
+                        "content": f"Combine these section summaries into one final summary:\n\n{combined}"
+                    }
+                ],
+                max_tokens=4000
+            )
+            final_summary = response.choices[0].message.content
+            if final_summary and not any(phrase in final_summary.lower() for phrase in REFUSAL_PHRASES):
+                summary_text = final_summary
+            else:
+                logger.warning(f"Final summary refused, using concatenated chunk summaries")
+                summary_text = combined
+        except Exception as e:
+            logger.error(f"Error combining summaries: {e}")
+            summary_text = combined
+    elif chunk_summaries:
+        summary_text = chunk_summaries[0]
+    else:
+        summary_text = "Summary could not be generated for this transcript."
+
+    logger.info(f"Summary complete: {len(summary_text)} chars")
 
     # Create Telegraph pages
     logger.info("Creating Telegraph pages...")
