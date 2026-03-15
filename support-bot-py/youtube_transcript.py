@@ -81,6 +81,9 @@ async def _create_telegraph_page(title: str, content: str) -> str | None:
                 }
             )
             data = response.json()
+            if not data.get('ok'):
+                logger.error(f"Telegraph API error: {data.get('error', 'unknown error')}")
+                return None
             page_url = f"https://telegra.ph/{data['result']['path']}"
             logger.info(f"Created Telegraph page: {page_url}")
             return page_url
@@ -100,7 +103,7 @@ async def process_youtube_transcript(url: str) -> dict:
         dict with keys:
             - video_id: str
             - original_language: str
-            - transcript_url: str | None
+            - transcript_urls: list[str]
             - summary_url: str | None
             - summary_text: str
 
@@ -287,13 +290,46 @@ async def process_youtube_transcript(url: str) -> dict:
     # Create Telegraph pages
     logger.info("Creating Telegraph pages...")
 
-    # For transcript page: put summary at the top, then full transcript
-    transcript_with_summary = f"SUMMARY\n\n{summary_text}\n\n{'=' * 50}\n\nFULL TRANSCRIPT\n\n{translated_text}"
+    # Telegraph has a ~64KB content limit; split transcript into multiple parts
+    max_telegraph_chars = 55000  # conservative limit to account for JSON/node overhead
 
-    transcript_url = await _create_telegraph_page(
-        f"YouTube Transcript: {video_id}",
-        transcript_with_summary
-    )
+    # First page: summary + beginning of transcript
+    header = f"SUMMARY\n\n{summary_text}\n\n{'=' * 50}\n\nFULL TRANSCRIPT\n\n"
+    available_first_page = max_telegraph_chars - len(header)
+
+    transcript_urls = []
+
+    if len(translated_text) <= available_first_page:
+        # Single page is enough
+        content = header + translated_text
+        url = await _create_telegraph_page(f"YouTube Transcript: {video_id}", content)
+        if url:
+            transcript_urls.append(url)
+    else:
+        # Split into multiple parts
+        # Part 1: summary + start of transcript
+        part1_text = translated_text[:available_first_page]
+        content = header + part1_text
+        url = await _create_telegraph_page(f"Transcript Part 1: {video_id}", content)
+        if url:
+            transcript_urls.append(url)
+
+        # Remaining parts: transcript continuation
+        remaining = translated_text[available_first_page:]
+        part_num = 2
+        while remaining:
+            chunk = remaining[:max_telegraph_chars]
+            remaining = remaining[max_telegraph_chars:]
+            part_header = f"FULL TRANSCRIPT (continued)\n\n"
+            content = part_header + chunk
+            url = await _create_telegraph_page(
+                f"Transcript Part {part_num}: {video_id}", content
+            )
+            if url:
+                transcript_urls.append(url)
+            part_num += 1
+
+        logger.info(f"Created {len(transcript_urls)} transcript pages for {len(translated_text)} chars")
 
     summary_url = await _create_telegraph_page(
         f"YouTube Summary: {video_id}",
@@ -303,7 +339,7 @@ async def process_youtube_transcript(url: str) -> dict:
     return {
         'video_id': video_id,
         'original_language': original_lang,
-        'transcript_url': transcript_url,
+        'transcript_urls': transcript_urls,
         'summary_url': summary_url,
         'summary_text': summary_text
     }
@@ -336,8 +372,10 @@ if __name__ == "__main__":
     print(f"Original Language: {result['original_language']}")
     print()
 
-    if result['transcript_url']:
-        print(f"📄 Transcript URL: {result['transcript_url']}")
+    if result['transcript_urls']:
+        for i, url in enumerate(result['transcript_urls'], 1):
+            label = "Transcript" if len(result['transcript_urls']) == 1 else f"Transcript Part {i}"
+            print(f"📄 {label} URL: {url}")
     else:
         print("⚠️  Transcript Telegraph page creation failed")
 

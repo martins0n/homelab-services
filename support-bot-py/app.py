@@ -97,8 +97,12 @@ async def handle_youtube_transcript(chat_id, matched):
             f"Original Language: {result['original_language']}"
         ]
 
-        if result.get('transcript_url'):
-            message_parts.append(f"📄 <a href=\"{result['transcript_url']}\">Full Transcript</a>")
+        transcript_urls = result.get('transcript_urls', [])
+        if len(transcript_urls) == 1:
+            message_parts.append(f"📄 <a href=\"{transcript_urls[0]}\">Full Transcript</a>")
+        elif len(transcript_urls) > 1:
+            for i, t_url in enumerate(transcript_urls, 1):
+                message_parts.append(f"📄 <a href=\"{t_url}\">Transcript Part {i}</a>")
         if result.get('summary_url'):
             message_parts.append(f"📝 <a href=\"{result['summary_url']}\">Summary</a>")
 
