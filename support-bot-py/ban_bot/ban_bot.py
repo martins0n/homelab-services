@@ -43,24 +43,45 @@ else:
 async def handle_message(r: Request):
     logger.info(f"Received request: {r}")
     msg = TelegramRequest(**r)
-    if msg.message.text is not None:
-        chat_id = msg.message.chat.id
-        can_call_flag = can_call(chat_id, 10, 60)
-        if not can_call_flag:
-            logger.info(f"Too many calls from {chat_id}")
-            return
-        is_spam, _ = await check_spam(msg.message.text)
-        logger.info(f"Is spam: {is_spam}, reason: {_}, user: {msg.message.from_}")
-        if is_spam:
-            async with AsyncClient(timeout=60) as client:
-                await client.post(
-                    f"https://api.telegram.org/bot{settings.telegram_spam_bot_token}/deleteMessage",
-                    data={"chat_id": msg.message.chat.id, "message_id": msg.message.message_id}
-                )
-                await client.post(
-                    f"https://api.telegram.org/bot{settings.telegram_spam_bot_token}/banChatMember",
-                    data={"chat_id": msg.message.chat.id, "user_id": msg.message.from_.id, "revoke_messages": True}
-                )
+    message = msg.message
+
+    # Collect all text content for spam scoring
+    parts = []
+    if message.text:
+        parts.append(message.text)
+    if message.caption:
+        parts.append(message.caption)
+    if message.quote and message.quote.text:
+        parts.append(message.quote.text)
+
+    # Extract URLs from text_link entities (hidden links)
+    for entity_list in [message.entities, message.caption_entities]:
+        if entity_list:
+            for e in entity_list:
+                if e.type == "text_link" and e.url:
+                    parts.append(e.url)
+
+    combined_text = "\n".join(parts)
+    if not combined_text:
+        return
+
+    chat_id = message.chat.id
+    if not can_call(chat_id, 10, 60):
+        logger.info(f"Too many calls from {chat_id}")
+        return
+
+    is_spam, reason = await check_spam(combined_text)
+    logger.info(f"Is spam: {is_spam}, reason: {reason}, user: {message.from_}")
+    if is_spam:
+        async with AsyncClient(timeout=60) as client:
+            await client.post(
+                f"https://api.telegram.org/bot{settings.telegram_spam_bot_token}/deleteMessage",
+                data={"chat_id": message.chat.id, "message_id": message.message_id}
+            )
+            await client.post(
+                f"https://api.telegram.org/bot{settings.telegram_spam_bot_token}/banChatMember",
+                data={"chat_id": message.chat.id, "user_id": message.from_.id, "revoke_messages": True}
+            )
 
 
 @router.post("/webhook", dependencies=dependencies)
