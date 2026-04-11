@@ -2,7 +2,7 @@ FROM python:3.10-slim
 
 WORKDIR /app
 
-RUN apt update && apt install -y gcc g++
+RUN apt update && apt install -y gcc g++ ffmpeg
 
 RUN pip install --upgrade pip && \
     pip install poetry==1.6.1

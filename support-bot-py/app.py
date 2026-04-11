@@ -1,4 +1,5 @@
 import asyncio
+import html
 import re
 from contextlib import asynccontextmanager
 
@@ -15,6 +16,7 @@ from settings import Settings
 from summarizer import summary_url
 from telegram import TelegramBot
 from utils import create_verify_token_function, filter_context_size
+from video_translator import translate_media
 from youtube import get_transcript_summary
 from youtube_transcript import process_youtube_transcript
 
@@ -65,7 +67,11 @@ async def handle_start(chat_id):
         "sy - Summarize YouTube video (shortcut)\n"
         "youtube_transcript - Get transcript with Telegraph pages\n"
         "yt - Get transcript with Telegraph pages (shortcut)\n"
-        "prompt - Direct OpenAI prompt"
+        "prompt - Direct OpenAI prompt\n"
+        "\n"
+        "Forward any video, voice message, or round video-note to me "
+        "and I'll translate it to English. If there are multiple speakers, "
+        "I'll label them."
     )
     await telegram_bot.send_message(chat_id, message)
 
@@ -196,10 +202,65 @@ async def handle_prompt(chat_id, matched):
     prompt_response = response.choices[0].message.content
     await telegram_bot.send_message(chat_id, prompt_response)
 
+
+_SPEAKER_LABEL_RE = re.compile(r"(?m)^Speaker\s+(\d+):")
+
+
+def _render_translation_body(text: str) -> str:
+    escaped = html.escape(text)
+    return _SPEAKER_LABEL_RE.sub(r"<b>Speaker \1:</b>", escaped)
+
+
+async def handle_translate_video(msg: TelegramMessage):
+    chat_id = msg.chat.id
+    media = msg.video or msg.video_note or msg.voice
+    logger.info(f"Received media for translation: chat_id={chat_id} file_id={media.file_id} size={media.file_size}")
+
+    if media.file_size and media.file_size > 20 * 1024 * 1024:
+        await telegram_bot.send_message(
+            chat_id,
+            "❌ File too large (>20 MB). Telegram Bot API can't download it.",
+        )
+        return
+
+    await telegram_bot.send_message(chat_id, "🎧 Translating to English...")
+    try:
+        file_info = await telegram_bot.get_file(media.file_id)
+        file_bytes = await telegram_bot.download_file(file_info["file_path"])
+        filename = file_info["file_path"].rsplit("/", 1)[-1]
+        result = await translate_media(file_bytes, filename, openai, settings)
+    except Exception as e:
+        logger.exception("translate_video failed")
+        await telegram_bot.send_message(chat_id, f"❌ Error: {e}")
+        return
+
+    if result.source_lang:
+        header = f"<b>English translation</b> <i>(from {result.source_lang}, path: {result.path_used})</i>"
+    else:
+        header = f"<b>English translation</b> <i>(path: {result.path_used})</i>"
+
+    body = _render_translation_body(result.translated_text)
+    if result.original_text:
+        body = (
+            f"<b>Original:</b>\n{html.escape(result.original_text)}\n\n"
+            f"<b>Translation:</b>\n{body}"
+        )
+
+    await telegram_bot.send_message(chat_id, f"{header}\n\n{body}", parse_mode="HTML")
+
+
 async def handle_message(request: TelegramRequest):
     msg = request.message
     chat_id = msg.chat.id
+
+    if msg.video or msg.video_note or msg.voice:
+        if msg.chat.type == "private":
+            await handle_translate_video(msg)
+        return
+
     text = msg.text
+    if text is None:
+        return
 
     if text.startswith("/echo"):
         matched = re.match(r"/echo (.+)", text).group(1)

@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     model_summarizer: str = "gpt-4o-mini"
     model_spam: str = "gpt-4o-mini"
     model_transcript: str = "gpt-4o-mini"
+    model_audio_translator: str = "gpt-4o-mini-audio-preview"
+    model_transcription: str = "gpt-4o-mini-transcribe"
+    model_diarize: str = "gpt-4o-transcribe-diarize"
     x_telegram_bot_header: str
     openai_api_key: str
     context_size: int = 4096

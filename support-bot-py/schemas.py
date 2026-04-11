@@ -33,6 +33,14 @@ class TelegramExternalReply(BaseModel):
     chat: TelegramChat | None = None
 
 
+class TelegramFile(BaseModel):
+    file_id: str
+    file_unique_id: str
+    file_size: int | None = None
+    duration: int | None = None
+    mime_type: str | None = None
+
+
 class TelegramMessage(BaseModel):
     message_id: int
     from_: TelegramUser = Field(..., alias="from")
@@ -44,6 +52,9 @@ class TelegramMessage(BaseModel):
     caption_entities: list[TelegramMessageEntity] | None = None
     quote: TelegramQuote | None = None
     external_reply: TelegramExternalReply | None = None
+    video: TelegramFile | None = None
+    video_note: TelegramFile | None = None
+    voice: TelegramFile | None = None
 
 
 class TelegramRequest(BaseModel):
