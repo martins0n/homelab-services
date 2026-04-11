@@ -211,6 +211,22 @@ def _render_translation_body(text: str) -> str:
     return _SPEAKER_LABEL_RE.sub(r"<b>Speaker \1:</b>", escaped)
 
 
+def _source_link_html(msg: TelegramMessage) -> str | None:
+    """Build an HTML anchor pointing at the original message, if it can be linked publicly.
+
+    Works for forwards from public channels (uses forward_origin.chat.username +
+    message_id). Returns None for direct uploads, private chats, or hidden users.
+    The anchor survives forwarding the translation message itself, so readers can
+    still click through to the source.
+    """
+    fo = msg.forward_origin
+    if not fo or fo.type != "channel" or not fo.chat or not fo.chat.username or not fo.message_id:
+        return None
+    url = f"https://t.me/{fo.chat.username}/{fo.message_id}"
+    label = html.escape(fo.chat.title or fo.chat.username)
+    return f'🔗 <a href="{html.escape(url, quote=True)}">{label}</a>'
+
+
 async def handle_translate_video(msg: TelegramMessage):
     chat_id = msg.chat.id
     media = msg.video or msg.video_note or msg.voice
@@ -238,6 +254,10 @@ async def handle_translate_video(msg: TelegramMessage):
         header = f"<b>English translation</b> <i>(from {result.source_lang}, path: {result.path_used})</i>"
     else:
         header = f"<b>English translation</b> <i>(path: {result.path_used})</i>"
+
+    source_line = _source_link_html(msg)
+    if source_line:
+        header = f"{header}\n{source_line}"
 
     body = _render_translation_body(result.translated_text)
     if result.original_text:

@@ -12,6 +12,7 @@ class TelegramUser(BaseModel):
 class TelegramChat(BaseModel):
     id: int
     type: str
+    title: str | None = None
     first_name: str | None = None
     username: str | None = None
 
@@ -41,6 +42,17 @@ class TelegramFile(BaseModel):
     mime_type: str | None = None
 
 
+class TelegramForwardOrigin(BaseModel):
+    type: str  # "user" | "hidden_user" | "chat" | "channel"
+    date: int | None = None
+    chat: TelegramChat | None = None
+    message_id: int | None = None
+    author_signature: str | None = None
+    sender_user: TelegramUser | None = None
+    sender_user_name: str | None = None
+    sender_chat: TelegramChat | None = None
+
+
 class TelegramMessage(BaseModel):
     message_id: int
     from_: TelegramUser = Field(..., alias="from")
@@ -55,6 +67,7 @@ class TelegramMessage(BaseModel):
     video: TelegramFile | None = None
     video_note: TelegramFile | None = None
     voice: TelegramFile | None = None
+    forward_origin: TelegramForwardOrigin | None = None
 
 
 class TelegramRequest(BaseModel):
