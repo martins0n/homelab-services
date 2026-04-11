@@ -6,6 +6,7 @@ class Settings(BaseSettings):
         env_file=".env", env_file_encoding="utf-8", extra="ignore"
     )
     telegram_token: str
+    telegram_local_api_url: str | None = None
     database_url: str
     database_key: str
     timeout: int = 20000

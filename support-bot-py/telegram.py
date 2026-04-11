@@ -1,15 +1,20 @@
+import os
+
 from httpx import AsyncClient
 from loguru import logger
 
 
 class TelegramBot:
-    def __init__(self, token: str):
+    def __init__(self, token: str, local_api_url: str | None = None):
         self.token = token
+        self.local_mode = bool(local_api_url)
+        self.api_base_url = (local_api_url or "https://api.telegram.org").rstrip("/")
+
+    def _bot_base(self) -> str:
+        return f"{self.api_base_url}/bot{self.token}"
 
     async def send_message(self, chat_id: int, text: str, parse_mode: str = None):
-        async with AsyncClient(
-            base_url=f"https://api.telegram.org/bot{self.token}"
-        ) as client:
+        async with AsyncClient(base_url=self._bot_base()) as client:
             payload = {
                 "chat_id": chat_id,
                 "text": text
@@ -30,9 +35,7 @@ class TelegramBot:
                 logger.error(f"Telegram API error: {result.text}")
 
     async def get_file(self, file_id: str) -> dict:
-        async with AsyncClient(
-            base_url=f"https://api.telegram.org/bot{self.token}"
-        ) as client:
+        async with AsyncClient(base_url=self._bot_base()) as client:
             result = await client.post("/getFile", json={"file_id": file_id})
             if result.status_code != 200:
                 logger.error(f"Telegram getFile error: {result.text}")
@@ -40,7 +43,19 @@ class TelegramBot:
             return result.json()["result"]
 
     async def download_file(self, file_path: str) -> bytes:
-        url = f"https://api.telegram.org/file/bot{self.token}/{file_path}"
+        if self.local_mode:
+            # In local mode, getFile already returned an absolute filesystem path.
+            # Read and then unlink so the shared volume doesn't accumulate files.
+            try:
+                with open(file_path, "rb") as f:
+                    return f.read()
+            finally:
+                try:
+                    os.unlink(file_path)
+                except OSError as e:
+                    logger.warning(f"failed to unlink {file_path}: {e}")
+
+        url = f"{self.api_base_url}/file/bot{self.token}/{file_path}"
         async with AsyncClient() as client:
             result = await client.get(url, timeout=60.0)
             if result.status_code != 200:

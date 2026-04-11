@@ -184,7 +184,10 @@ async def main():
         return
     
     # Create components
-    telegram_bot = TelegramBot(settings.telegram_token)
+    telegram_bot = TelegramBot(
+        settings.telegram_token,
+        local_api_url=settings.telegram_local_api_url,
+    )
     scheduler = NewsScheduler(telegram_bot, settings)
     
     print(f"📰 Testing newsletter submission to channel: {settings.news_channel_id}")

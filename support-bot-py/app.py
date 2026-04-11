@@ -43,7 +43,10 @@ app.include_router(ban_bot_router)
 
 
 
-telegram_bot = TelegramBot(settings.telegram_token)
+telegram_bot = TelegramBot(
+    settings.telegram_token,
+    local_api_url=settings.telegram_local_api_url,
+)
 
 message_repository = MessageRepository()
 
@@ -232,10 +235,13 @@ async def handle_translate_video(msg: TelegramMessage):
     media = msg.video or msg.video_note or msg.voice
     logger.info(f"Received media for translation: chat_id={chat_id} file_id={media.file_id} size={media.file_size}")
 
-    if media.file_size and media.file_size > 20 * 1024 * 1024:
+    # Sanity cap only — the real effective ceiling is OpenAI's 25 MB post-transcode
+    # mp3 limit (~50 minutes of audio). Larger files should be split by the sender.
+    _max_bytes = 500 * 1024 * 1024
+    if media.file_size and media.file_size > _max_bytes:
         await telegram_bot.send_message(
             chat_id,
-            "❌ File too large (>20 MB). Telegram Bot API can't download it.",
+            f"❌ File too large (>{_max_bytes // (1024 * 1024)} MB). Please split it.",
         )
         return
 
