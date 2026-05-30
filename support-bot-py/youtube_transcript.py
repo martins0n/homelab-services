@@ -92,6 +92,103 @@ async def _create_telegraph_page(title: str, content: str) -> str | None:
         return None
 
 
+async def _create_telegraph_pages(
+    title: str, content: str, min_chunk: int = 5000
+) -> list[str]:
+    """Create Telegraph page(s) for `content`.
+
+    Telegraph rejects pages whose serialized JSON exceeds ~64 KB (CONTENT_TOO_BIG),
+    and the serialized size is hard to predict from the character count alone
+    (paragraph/<br> nodes add overhead). If a page is rejected we split the
+    content in half on a newline boundary and retry each half recursively, so a
+    too-large part is never silently dropped. Returns the page URLs in order.
+    """
+    url = await _create_telegraph_page(title, content)
+    if url:
+        return [url]
+
+    if len(content) <= min_chunk:
+        logger.error(f"Telegraph page creation failed for minimal chunk '{title}'")
+        return []
+
+    mid = len(content) // 2
+    # Prefer splitting on a newline near the middle to avoid cutting mid-line.
+    split_at = content.rfind("\n", 0, mid)
+    if split_at <= 0:
+        split_at = mid
+    logger.warning(
+        f"Splitting '{title}' ({len(content)} chars) after Telegraph rejection"
+    )
+    left = await _create_telegraph_pages(f"{title} (a)", content[:split_at], min_chunk)
+    right = await _create_telegraph_pages(f"{title} (b)", content[split_at:], min_chunk)
+    return left + right
+
+
+def _snippet_attr(snippet, attr):
+    """Read a field from a transcript snippet (dict or FetchedTranscriptSnippet)."""
+    if isinstance(snippet, dict):
+        return snippet.get(attr)
+    return getattr(snippet, attr, None)
+
+
+def _segment_into_paragraphs(
+    snippets, gap_threshold: float = 2.0, max_chars: int = 600
+) -> str:
+    """Join transcript snippets into readable paragraphs separated by blank lines.
+
+    YouTube returns transcripts as a flat stream of short cues (text/start/duration)
+    with no structure, so naively joining them yields one unbroken wall of text. We
+    start a new paragraph when speech pauses (a gap >= gap_threshold seconds between
+    the end of one cue and the start of the next) or when the current paragraph grows
+    past max_chars, whichever comes first. Falls back gracefully if timing is missing.
+    """
+    paragraphs: list[str] = []
+    current: list[str] = []
+    current_len = 0
+    prev_end = None
+
+    for snippet in snippets:
+        text = (_snippet_attr(snippet, "text") or "").strip()
+        if not text:
+            continue
+        start = _snippet_attr(snippet, "start") or 0.0
+        duration = _snippet_attr(snippet, "duration") or 0.0
+        gap = (start - prev_end) if prev_end is not None else 0.0
+
+        if current and (gap >= gap_threshold or current_len >= max_chars):
+            paragraphs.append(" ".join(current))
+            current = []
+            current_len = 0
+
+        current.append(text)
+        current_len += len(text) + 1
+        prev_end = start + duration
+
+    if current:
+        paragraphs.append(" ".join(current))
+
+    return "\n\n".join(paragraphs)
+
+
+def _chunk_on_paragraphs(text: str, chunk_size: int) -> list[str]:
+    """Split text into <=chunk_size pieces on blank-line (paragraph) boundaries.
+
+    Keeps paragraphs intact so translating then re-joining chunks neither merges nor
+    fractures them. A single paragraph longer than chunk_size becomes its own chunk.
+    """
+    chunks: list[str] = []
+    current = ""
+    for para in text.split("\n\n"):
+        if current and len(current) + len(para) + 2 > chunk_size:
+            chunks.append(current)
+            current = para
+        else:
+            current = f"{current}\n\n{para}" if current else para
+    if current:
+        chunks.append(current)
+    return chunks
+
+
 async def process_youtube_transcript(url: str) -> dict:
     """
     Process YouTube video and create transcript + summary with Telegraph pages.
@@ -147,22 +244,21 @@ async def process_youtube_transcript(url: str) -> dict:
     if not transcript_data:
         raise NoTranscriptFound(video_id)
 
-    # Convert to text
-    # .fetch() returns a list - check if items are dicts or objects
+    # Convert to text, grouping cues into readable paragraphs (handles both the
+    # dict and FetchedTranscriptSnippet shapes returned across library versions).
     if transcript_data:
-        first_item = transcript_data[0]
-        logger.debug(f"Transcript item type: {type(first_item)}, has 'text': {hasattr(first_item, 'text')}")
-
-        # Handle both dict format and object format
-        if isinstance(first_item, dict):
-            full_text = " ".join(item['text'] for item in transcript_data)
-        else:
-            # FetchedTranscriptSnippet objects
-            full_text = " ".join(item.text for item in transcript_data)
+        logger.debug(
+            f"Transcript item type: {type(transcript_data[0])}, "
+            f"{len(transcript_data)} snippets"
+        )
+        full_text = _segment_into_paragraphs(transcript_data)
     else:
         full_text = ""
 
-    logger.info(f"Transcript length: {len(full_text)} characters")
+    para_count = full_text.count("\n\n") + 1 if full_text else 0
+    logger.info(
+        f"Transcript length: {len(full_text)} characters, {para_count} paragraphs"
+    )
 
     # Translate to English only if needed (non-English transcripts)
     openai_client = AsyncOpenAI(api_key=settings.openai_api_key)
@@ -173,10 +269,11 @@ async def process_youtube_transcript(url: str) -> dict:
     else:
         logger.info(f"Translating transcript from '{original_lang}' to English ({len(full_text)} chars)...")
 
-        # Chunk the transcript to avoid exceeding model output limits
-        # gpt-4o-mini can output ~16K tokens, so keep input chunks manageable
+        # Chunk the transcript to avoid exceeding model output limits.
+        # gpt-4o-mini can output ~16K tokens, so keep input chunks manageable.
+        # Split on paragraph boundaries so paragraphs stay intact across chunks.
         chunk_size = 15000  # characters per chunk
-        chunks = [full_text[i:i + chunk_size] for i in range(0, len(full_text), chunk_size)]
+        chunks = _chunk_on_paragraphs(full_text, chunk_size)
         logger.info(f"Split transcript into {len(chunks)} chunks for translation")
 
         translated_chunks = []
@@ -186,7 +283,7 @@ async def process_youtube_transcript(url: str) -> dict:
                 model=settings.model_transcript,
                 messages=[{
                     "role": "user",
-                    "content": f"Translate the following YouTube transcript chunk to English. Preserve meaning accurately:\n\n{chunk}"
+                    "content": f"Translate the following YouTube transcript chunk to English. Preserve meaning accurately and keep the blank lines that separate paragraphs:\n\n{chunk}"
                 }],
                 max_tokens=16000
             )
@@ -203,7 +300,9 @@ async def process_youtube_transcript(url: str) -> dict:
                 # Fall back to original chunk text
                 translated_chunks.append(chunk)
 
-        translated_text = "\n".join(translated_chunks)
+        # Chunks are paragraph-aligned, so re-join with a blank line to restore the
+        # paragraph break that sat between each chunk's boundary paragraphs.
+        translated_text = "\n\n".join(translated_chunks)
         logger.info(f"Translation complete: {len(translated_text)} chars total")
 
     # Generate summary with chunking and refusal detection
@@ -290,8 +389,10 @@ async def process_youtube_transcript(url: str) -> dict:
     # Create Telegraph pages
     logger.info("Creating Telegraph pages...")
 
-    # Telegraph has a ~64KB content limit; split transcript into multiple parts
-    max_telegraph_chars = 55000  # conservative limit to account for JSON/node overhead
+    # Telegraph has a ~64KB *serialized JSON* content limit; the per-node (<p>/<br>)
+    # overhead means the safe character budget is well below that. Keep it conservative
+    # so the first attempt usually fits; _create_telegraph_pages re-splits on rejection.
+    max_telegraph_chars = 30000
 
     # First page: summary + beginning of transcript
     header = f"SUMMARY\n\n{summary_text}\n\n{'=' * 50}\n\nFULL TRANSCRIPT\n\n"
@@ -302,17 +403,18 @@ async def process_youtube_transcript(url: str) -> dict:
     if len(translated_text) <= available_first_page:
         # Single page is enough
         content = header + translated_text
-        url = await _create_telegraph_page(f"YouTube Transcript: {video_id}", content)
-        if url:
-            transcript_urls.append(url)
+        transcript_urls.extend(
+            await _create_telegraph_pages(f"YouTube Transcript: {video_id}", content)
+        )
     else:
         # Split into multiple parts
         # Part 1: summary + start of transcript
         part1_text = translated_text[:available_first_page]
-        content = header + part1_text
-        url = await _create_telegraph_page(f"Transcript Part 1: {video_id}", content)
-        if url:
-            transcript_urls.append(url)
+        transcript_urls.extend(
+            await _create_telegraph_pages(
+                f"Transcript Part 1: {video_id}", header + part1_text
+            )
+        )
 
         # Remaining parts: transcript continuation
         remaining = translated_text[available_first_page:]
@@ -321,12 +423,11 @@ async def process_youtube_transcript(url: str) -> dict:
             chunk = remaining[:max_telegraph_chars]
             remaining = remaining[max_telegraph_chars:]
             part_header = f"FULL TRANSCRIPT (continued)\n\n"
-            content = part_header + chunk
-            url = await _create_telegraph_page(
-                f"Transcript Part {part_num}: {video_id}", content
+            transcript_urls.extend(
+                await _create_telegraph_pages(
+                    f"Transcript Part {part_num}: {video_id}", part_header + chunk
+                )
             )
-            if url:
-                transcript_urls.append(url)
             part_num += 1
 
         logger.info(f"Created {len(transcript_urls)} transcript pages for {len(translated_text)} chars")
