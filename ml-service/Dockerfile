@@ -12,9 +12,11 @@ WORKDIR /app
 # gigabytes of unusable NVIDIA libraries onto the arm64 Pi. The +cpu wheels skip
 # all of that and are much smaller (~143 MB vs ~406 MB for torch alone).
 # extra-index-url (not index-url) so torch's own deps (typing-extensions, sympy,
-# …) still resolve from PyPI; the explicit +cpu pin only exists on the torch index.
+# …) still resolve from PyPI; the explicit +cpu pins only exist on the torch index.
+# torchcodec (pyannote's audio decoder) MUST also be the +cpu build — its default
+# wheel links CUDA (libnvrtc.so.13) and fails to load without a GPU.
 RUN pip install --no-cache-dir \
-    torch==2.12.0+cpu torchaudio==2.11.0+cpu \
+    torch==2.12.0+cpu torchaudio==2.11.0+cpu torchcodec==0.13.0+cpu \
     --extra-index-url https://download.pytorch.org/whl/cpu
 
 COPY requirements.txt .
