@@ -25,13 +25,10 @@ services:
     depends_on:
       - telegram-bot-api
 
-  # Heavyweight ML (pyannote/torch) kept out of the bot image. Built locally on the
-  # host (too heavy for CI/QEMU); pull_policy:build so `up --pull always` won't try
-  # to pull the local tag. Bot reaches it on the shared default network.
+  # Heavyweight ML (pyannote/torch) kept out of the bot image; built in CI (arm64)
+  # and pulled like the bot. Bot reaches it on the shared default network.
   ml-service:
-    build: ../ml-service
-    image: ml-service:latest
-    pull_policy: build
+    image: ghcr.io/martins0n/homelab-services/ml-service:latest
     restart: unless-stopped
     env_file:
       - ../stack.env
