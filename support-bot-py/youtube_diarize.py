@@ -1,0 +1,280 @@
+"""Speaker-diarized YouTube transcripts.
+
+Pipeline:
+  1. download audio (yt-dlp) and transcode (ffmpeg)
+  2. get timed cues:
+       - primary: YouTube auto-captions in the original language (free, accurate)
+       - fallback: Groq Whisper ASR when the video has no captions
+  3. diarization turns from the separate ml-service (pyannote)
+  4. align each cue to the max-overlap speaker -> "Speaker N: ..." lines
+  5. translate to English preserving the speaker labels
+  6. publish to Telegraph
+
+Diarization itself is acoustic, so we always need the audio; only transcription
+is skipped when captions exist (the cheap, higher-quality path).
+"""
+import asyncio
+import os
+import tempfile
+
+import httpx
+from loguru import logger
+from openai import AsyncOpenAI
+from youtube_transcript_api import NoTranscriptFound, YouTubeTranscriptApi
+
+from settings import Settings
+from video_translator import _DIARIZE_TRANSLATE_PROMPT, _is_refusal
+from youtube import get_youtube_id
+from youtube_transcript import _create_telegraph_pages
+
+
+async def _ffmpeg(in_bytes: bytes, in_ext: str, out_args: list[str]) -> bytes:
+    """Run ffmpeg on in-memory audio, returning the transcoded bytes via pipe."""
+    with tempfile.NamedTemporaryFile(suffix=f".{in_ext}", delete=False) as inf:
+        inf.write(in_bytes)
+        in_path = inf.name
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg", "-y", "-i", in_path, *out_args, "pipe:1",
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        out, err = await proc.communicate()
+        if proc.returncode != 0 or not out:
+            raise RuntimeError(f"ffmpeg failed: {err.decode('utf-8', 'replace')[-400:]}")
+        return out
+    finally:
+        try:
+            os.unlink(in_path)
+        except OSError:
+            pass
+
+
+async def _to_wav16k(in_bytes: bytes, in_ext: str) -> bytes:
+    return await _ffmpeg(in_bytes, in_ext, ["-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", "-f", "wav"])
+
+
+async def _to_mp3_small(in_bytes: bytes, in_ext: str) -> bytes:
+    return await _ffmpeg(in_bytes, in_ext, ["-vn", "-ac", "1", "-ar", "16000", "-b:a", "32k", "-c:a", "libmp3lame", "-f", "mp3"])
+
+
+async def _download_audio(url: str, proxy: str | None) -> tuple[bytes, str]:
+    """Download bestaudio via yt-dlp into a temp dir; return (bytes, ext)."""
+    with tempfile.TemporaryDirectory() as d:
+        out_tmpl = os.path.join(d, "audio.%(ext)s")
+        args = ["yt-dlp", "-q", "--no-warnings", "-f", "bestaudio", "-o", out_tmpl]
+        if proxy:
+            args += ["--proxy", proxy]
+        args.append(url)
+        proc = await asyncio.create_subprocess_exec(
+            *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+        )
+        _, err = await proc.communicate()
+        if proc.returncode != 0:
+            raise RuntimeError(f"yt-dlp failed: {err.decode('utf-8', 'replace')[-400:]}")
+        files = os.listdir(d)
+        if not files:
+            raise RuntimeError("yt-dlp produced no output")
+        path = os.path.join(d, files[0])
+        with open(path, "rb") as f:
+            return f.read(), files[0].rsplit(".", 1)[-1].lower()
+
+
+def _youtube_cues(video_id: str, proxies: dict | None) -> tuple[list[dict], str] | None:
+    """Original-language YouTube captions as [{text,start,end}] + language code.
+    Prefers a human transcript, else the original auto-generated one."""
+    try:
+        tl = YouTubeTranscriptApi.list_transcripts(video_id, proxies=proxies)
+    except Exception as e:
+        logger.info(f"no transcript list for {video_id}: {e}")
+        return None
+
+    chosen = next((t for t in tl if not t.is_generated), None) or next(iter(tl), None)
+    if chosen is None:
+        return None
+    data = chosen.fetch()
+
+    def attr(item, name):
+        return item[name] if isinstance(item, dict) else getattr(item, name)
+
+    cues = []
+    for item in data:
+        text = (attr(item, "text") or "").strip()
+        if not text:
+            continue
+        start = float(attr(item, "start"))
+        cues.append({"text": text, "start": start, "end": start + float(attr(item, "duration"))})
+    return (cues, chosen.language_code) if cues else None
+
+
+async def _groq_word_cues(mp3_bytes: bytes, settings: Settings) -> tuple[list[dict], str]:
+    """Fallback ASR: Groq Whisper with word timestamps -> [{text,start,end}], lang."""
+    client = AsyncOpenAI(api_key=settings.groq_api_key, base_url=settings.groq_base_url)
+    resp = await client.audio.transcriptions.create(
+        model=settings.model_groq_whisper,
+        file=("audio.mp3", mp3_bytes),
+        response_format="verbose_json",
+        timestamp_granularities=["word"],
+    )
+    d = resp.model_dump() if hasattr(resp, "model_dump") else dict(resp)
+    cues = [
+        {"text": w["word"], "start": float(w["start"]), "end": float(w["end"])}
+        for w in (d.get("words") or [])
+    ]
+    return cues, d.get("language") or "unknown"
+
+
+def _parse_turns(data: dict) -> list[tuple[float, float, str]]:
+    return [(float(t["start"]), float(t["end"]), t["speaker"]) for t in data.get("turns", [])]
+
+
+async def _diarize_url(video_url: str, proxy: str | None, settings: Settings) -> list[tuple[float, float, str]]:
+    """ml-service downloads the audio itself and returns speaker turns (captions path)."""
+    endpoint = settings.ml_service_url.rstrip("/") + "/diarize"
+    form = {"url": video_url}
+    if proxy:
+        form["proxy"] = proxy
+    async with httpx.AsyncClient(timeout=settings.diarize_timeout) as client:
+        r = await client.post(endpoint, data=form)
+        r.raise_for_status()
+        return _parse_turns(r.json())
+
+
+async def _diarize_file(wav_bytes: bytes, settings: Settings) -> list[tuple[float, float, str]]:
+    """Diarize already-downloaded audio (Groq-fallback path, reuses the download)."""
+    endpoint = settings.ml_service_url.rstrip("/") + "/diarize"
+    async with httpx.AsyncClient(timeout=settings.diarize_timeout) as client:
+        r = await client.post(endpoint, files={"file": ("audio.wav", wav_bytes, "audio/wav")})
+        r.raise_for_status()
+        return _parse_turns(r.json())
+
+
+def align_cues_to_speakers(cues: list[dict], turns: list[tuple[float, float, str]]) -> str:
+    """Assign each timed cue to the max-overlap speaker turn (nearest turn if no
+    overlap, never a new speaker), merge consecutive, normalize to 'Speaker N:'."""
+    def speaker_at(s: float, e: float) -> str:
+        best, best_ov = None, 0.0
+        for ts, te, lbl in turns:
+            ov = max(0.0, min(te, e) - max(ts, s))
+            if ov > best_ov:
+                best_ov, best = ov, lbl
+        if best is not None:
+            return best
+        mid = (s + e) / 2
+        return min(turns, key=lambda t: min(abs(t[0] - mid), abs(t[1] - mid)))[2] if turns else "SPEAKER_00"
+
+    merged: list[list] = []
+    for c in cues:
+        text = (c["text"] or "").strip()
+        if not text:
+            continue
+        spk = speaker_at(c["start"], c["end"])
+        if merged and merged[-1][0] == spk:
+            merged[-1][1] += " " + text
+        else:
+            merged.append([spk, text])
+
+    label_map: dict[str, str] = {}
+    lines = []
+    for spk, text in merged:
+        if spk not in label_map:
+            label_map[spk] = f"Speaker {len(label_map) + 1}"
+        lines.append(f"{label_map[spk]}: {text}")
+    return "\n".join(lines)
+
+
+async def _translate_preserving_labels(text: str, settings: Settings) -> str:
+    """Translate a diarized transcript to English, chunked on speaker-line
+    boundaries, keeping every 'Speaker N:' label intact."""
+    client = AsyncOpenAI(api_key=settings.openai_api_key)
+    lines = text.split("\n")
+    chunks, cur = [], ""
+    for ln in lines:
+        if cur and len(cur) + len(ln) + 1 > 12000:
+            chunks.append(cur)
+            cur = ln
+        else:
+            cur = f"{cur}\n{ln}" if cur else ln
+    if cur:
+        chunks.append(cur)
+
+    out = []
+    for i, chunk in enumerate(chunks):
+        logger.info(f"diarize-translate chunk {i + 1}/{len(chunks)} ({len(chunk)} chars)")
+        resp = await client.chat.completions.create(
+            model=settings.model_transcript,
+            messages=[
+                {"role": "system", "content": _DIARIZE_TRANSLATE_PROMPT},
+                {"role": "user", "content": chunk},
+            ],
+            max_tokens=16000,
+        )
+        t = (resp.choices[0].message.content or "").strip()
+        out.append(chunk if _is_refusal(t) or not t else t)
+    return "\n".join(out)
+
+
+async def process_youtube_diarize(url: str) -> dict:
+    """Full diarized-transcript pipeline. Returns a dict with transcript_urls,
+    original_language, num_speakers, and source ('captions' | 'asr')."""
+    settings = Settings()
+    video_id = get_youtube_id(url)
+    if not video_id:
+        raise ValueError("could not parse YouTube id")
+    logger.info(f"diarize: processing {video_id}")
+
+    proxy = settings.youtube_proxy_url
+    proxies = {"https": proxy} if proxy else None
+
+    # Captions first (free, no audio). If present, ml-service downloads the audio
+    # itself for diarization so the bot never handles it. Only the no-caption
+    # fallback downloads audio here (reused for both Groq ASR and diarization).
+    cues_lang = await asyncio.to_thread(_youtube_cues, video_id, proxies)
+    if cues_lang:
+        cues, lang = cues_lang
+        source = "captions"
+        logger.info(f"diarize: using {len(cues)} caption cues ({lang}); ml-service will fetch audio")
+        turns = await _diarize_url(url, proxy, settings)
+    else:
+        logger.info("diarize: no captions, falling back to Groq ASR")
+        raw_audio, ext = await _download_audio(url, proxy)
+        wav = await _to_wav16k(raw_audio, ext)
+        mp3 = await _to_mp3_small(raw_audio, ext)
+        turns_task = asyncio.create_task(_diarize_file(wav, settings))
+        cues, lang = await _groq_word_cues(mp3, settings)
+        source = "asr"
+        logger.info(f"diarize: Groq produced {len(cues)} word cues ({lang})")
+        turns = await turns_task
+
+    num_speakers = len({t[2] for t in turns})
+    logger.info(f"diarize: {len(turns)} turns, {num_speakers} speakers")
+
+    diarized = align_cues_to_speakers(cues, turns)
+    if not diarized:
+        raise RuntimeError("diarize: empty aligned transcript")
+
+    is_english = lang.lower().startswith("en")
+    translated = diarized if is_english else await _translate_preserving_labels(diarized, settings)
+
+    header = f"SPEAKER-DIARIZED TRANSCRIPT ({num_speakers} speakers, source: {source})\n\n"
+    transcript_urls = await _create_telegraph_pages(
+        f"Diarized Transcript: {video_id}", header + translated
+    )
+
+    return {
+        "video_id": video_id,
+        "original_language": lang,
+        "num_speakers": num_speakers,
+        "source": source,
+        "transcript_urls": transcript_urls,
+    }
+
+
+if __name__ == "__main__":
+    import sys
+
+    async def _main():
+        url = sys.argv[1] if len(sys.argv) > 1 else "https://www.youtube.com/watch?v=0GqGWC3tjPI"
+        result = await process_youtube_diarize(url)
+        print(result)
+
+    asyncio.run(_main())

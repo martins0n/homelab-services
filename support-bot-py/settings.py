@@ -32,3 +32,9 @@ class Settings(BaseSettings):
     news_default_days: int = 1  # Default days to look back for news
     news_channel_id: str | None = None  # Telegram channel ID to send newsletter to
     gmail_token_base64: str | None = None  # Base64 encoded token.pickle file
+    # Speaker diarization: ml-service (pyannote) + Groq Whisper ASR fallback
+    ml_service_url: str = "http://ml-service:8000"
+    diarize_timeout: int = 1800  # seconds; pyannote on CPU can take minutes
+    groq_api_key: str | None = None
+    groq_base_url: str = "https://api.groq.com/openai/v1"
+    model_groq_whisper: str = "whisper-large-v3"

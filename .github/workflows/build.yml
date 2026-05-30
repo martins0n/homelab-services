@@ -15,9 +15,12 @@ jobs:
       fail-fast: false
       matrix:
         dockerfile:
-          - {"name": "hello", "path": "hello/Dockerfile"}
-          - {"name": "support-bot", "path": "support-bot/Dockerfile"}
-          - {"name": "support-bot-py", "path": "support-bot-py/Dockerfile"}
+          - {"name": "hello", "path": "hello/Dockerfile", "platforms": "linux/amd64,linux/arm64"}
+          - {"name": "support-bot", "path": "support-bot/Dockerfile", "platforms": "linux/amd64,linux/arm64"}
+          - {"name": "support-bot-py", "path": "support-bot-py/Dockerfile", "platforms": "linux/amd64,linux/arm64"}
+          # ml-service (torch/pyannote) only ever runs on the arm64 Pi — build arm64 only
+          # to skip a huge, unused amd64/CUDA build.
+          - {"name": "ml-service", "path": "ml-service/Dockerfile", "platforms": "linux/arm64"}
     steps:
       - uses: actions/checkout@v2
         with:
@@ -37,7 +40,7 @@ jobs:
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
             IMAGE_ID=ghcr.io/${{ github.repository }}/${{ matrix.dockerfile.name }}
             docker buildx build \
-              --platform linux/amd64,linux/arm64 \
+              --platform ${{ matrix.dockerfile.platforms }} \
               --cache-from type=registry,ref=$IMAGE_ID:cache \
               --cache-to type=registry,ref=$IMAGE_ID:cache,mode=max \
               --tag $IMAGE_ID:latest \

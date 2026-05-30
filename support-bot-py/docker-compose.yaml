@@ -25,5 +25,22 @@ services:
     depends_on:
       - telegram-bot-api
 
+  # Heavyweight ML (pyannote/torch) kept out of the bot image. Built locally on the
+  # host (too heavy for CI/QEMU); pull_policy:build so `up --pull always` won't try
+  # to pull the local tag. Bot reaches it on the shared default network.
+  ml-service:
+    build: ../ml-service
+    image: ml-service:latest
+    pull_policy: build
+    restart: unless-stopped
+    env_file:
+      - ../stack.env
+    environment:
+      HF_HOME: /models
+      PYANNOTE_MODEL: pyannote/speaker-diarization-community-1
+    volumes:
+      - ml_models:/models
+
 volumes:
   telegram_bot_api_data:
+  ml_models:

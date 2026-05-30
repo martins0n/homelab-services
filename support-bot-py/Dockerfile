@@ -12,6 +12,9 @@ RUN poetry config virtualenvs.create false
 COPY pyproject.toml poetry.lock* /app/
 RUN poetry install --no-dev
 
+# yt-dlp (CLI) fetches audio for the diarized-transcript path
+RUN pip install --no-cache-dir yt-dlp
+
 COPY . /app
 
 EXPOSE 8000

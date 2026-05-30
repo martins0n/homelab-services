@@ -18,6 +18,7 @@ from telegram import TelegramBot
 from utils import create_verify_token_function, filter_context_size
 from video_translator import translate_media
 from youtube import get_transcript_summary
+from youtube_diarize import process_youtube_diarize
 from youtube_transcript import process_youtube_transcript
 
 settings = Settings()
@@ -123,6 +124,46 @@ async def handle_youtube_transcript(chat_id, matched):
         await telegram_bot.send_message(chat_id, "❌ No transcript available for this video.")
     except Exception as e:
         logger.error(f"Error in youtube_transcript: {e}")
+        await telegram_bot.send_message(chat_id, f"❌ Error: {str(e)}")
+
+
+def _wants_speakers(text: str) -> bool:
+    """Opt-in flag: '/youtube_transcript <url> speakers' (or 'diarize')."""
+    return bool(re.search(r"\b(speakers?|diariz\w*)\b", text, re.IGNORECASE))
+
+
+async def handle_youtube_diarize(chat_id, matched):
+    """Handler for the diarized (speaker-labeled) YouTube transcript path."""
+    logger.info(f"Received diarized youtube request: {matched}")
+    try:
+        url = re.search(r"(https?://[^\s]+)", matched).group(0)
+        await telegram_bot.send_message(
+            chat_id, "🎬🗣️ Diarizing video (downloading audio + detecting speakers, this can take a few minutes)..."
+        )
+        result = await process_youtube_diarize(url)
+
+        video_id = result["video_id"]
+        youtube_url = f"https://www.youtube.com/watch?v={video_id}"
+        message_parts = [
+            f"<b>Diarized Transcript</b> (Video: {video_id})",
+            f"🔗 <a href=\"{youtube_url}\">YouTube Link</a>",
+            f"🗣️ Speakers: {result['num_speakers']} · Language: {result['original_language']} · Source: {result['source']}",
+        ]
+        transcript_urls = result.get("transcript_urls", [])
+        if len(transcript_urls) == 1:
+            message_parts.append(f"📄 <a href=\"{transcript_urls[0]}\">Diarized Transcript</a>")
+        elif len(transcript_urls) > 1:
+            for i, t_url in enumerate(transcript_urls, 1):
+                message_parts.append(f"📄 <a href=\"{t_url}\">Transcript Part {i}</a>")
+        else:
+            message_parts.append("⚠️ Transcript page could not be created.")
+
+        await telegram_bot.send_message(chat_id, "\n".join(message_parts), parse_mode="HTML")
+
+    except NoTranscriptFound:
+        await telegram_bot.send_message(chat_id, "❌ No transcript available for this video.")
+    except Exception as e:
+        logger.error(f"Error in youtube_diarize: {e}")
         await telegram_bot.send_message(chat_id, f"❌ Error: {str(e)}")
 
 
@@ -298,10 +339,16 @@ async def handle_message(request: TelegramRequest):
         await handle_summary_url(chat_id, matched)
     elif text.startswith("/yt"):
         matched = re.match(r"/yt (.+)", text).group(1)
-        await handle_youtube_transcript(chat_id, matched)
+        if _wants_speakers(matched):
+            await handle_youtube_diarize(chat_id, matched)
+        else:
+            await handle_youtube_transcript(chat_id, matched)
     elif text.startswith("/youtube_transcript"):
         matched = re.match(r"/youtube_transcript (.+)", text).group(1)
-        await handle_youtube_transcript(chat_id, matched)
+        if _wants_speakers(matched):
+            await handle_youtube_diarize(chat_id, matched)
+        else:
+            await handle_youtube_transcript(chat_id, matched)
     elif text.startswith("/sy"):
         matched = re.match(r"/sy (.+)", text).group(1)
         await handle_summary_youtube(chat_id, matched)
