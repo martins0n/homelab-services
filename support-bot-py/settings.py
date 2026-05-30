@@ -34,7 +34,12 @@ class Settings(BaseSettings):
     gmail_token_base64: str | None = None  # Base64 encoded token.pickle file
     # Speaker diarization: ml-service (pyannote) + Groq Whisper ASR fallback
     ml_service_url: str = "http://ml-service:8000"
-    diarize_timeout: int = 1800  # seconds; pyannote on CPU can take minutes
+    # Diarization wait scales with audio length: max(floor, base + duration*factor).
+    # pyannote on the Pi CPU runs ~real-time or slower, so a fixed timeout starves
+    # long videos. Floor covers short clips; factor gives headroom (incl. throttling).
+    diarize_timeout: int = 600  # floor, seconds
+    diarize_timeout_base: int = 120  # constant overhead, seconds
+    diarize_realtime_factor: float = 3.0  # seconds of wait per second of audio
     groq_api_key: str | None = None
     groq_base_url: str = "https://api.groq.com/openai/v1"
     model_groq_whisper: str = "whisper-large-v3"

@@ -3,6 +3,8 @@ import html
 import re
 from contextlib import asynccontextmanager
 
+import httpx
+
 from fastapi import Depends, FastAPI
 from loguru import logger
 from openai import AsyncOpenAI
@@ -162,9 +164,17 @@ async def handle_youtube_diarize(chat_id, matched):
 
     except NoTranscriptFound:
         await telegram_bot.send_message(chat_id, "❌ No transcript available for this video.")
+    except httpx.TimeoutException:
+        logger.error("youtube_diarize: ml-service timed out")
+        await telegram_bot.send_message(
+            chat_id,
+            "⏱️ Diarization timed out — speaker analysis runs on CPU and this video is "
+            "likely too long. Try a shorter clip, or use it without 'speakers' for the "
+            "plain transcript.",
+        )
     except Exception as e:
-        logger.error(f"Error in youtube_diarize: {e}")
-        await telegram_bot.send_message(chat_id, f"❌ Error: {str(e)}")
+        logger.error(f"Error in youtube_diarize: {e!r}")
+        await telegram_bot.send_message(chat_id, f"❌ Error: {str(e) or type(e).__name__}")
 
 
 async def handle_default(msg: TelegramMessage):

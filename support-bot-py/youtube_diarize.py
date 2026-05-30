@@ -127,22 +127,37 @@ def _parse_turns(data: dict) -> list[tuple[float, float, str]]:
     return [(float(t["start"]), float(t["end"]), t["speaker"]) for t in data.get("turns", [])]
 
 
-async def _diarize_url(video_url: str, proxy: str | None, settings: Settings) -> list[tuple[float, float, str]]:
+def _scaled_timeout(duration_sec: float, settings: Settings) -> "httpx.Timeout":
+    """Read timeout scaled to audio length (pyannote on CPU runs ~real-time or
+    slower); connect stays short so an unreachable ml-service fails fast."""
+    read = max(
+        float(settings.diarize_timeout),
+        settings.diarize_timeout_base + duration_sec * settings.diarize_realtime_factor,
+    )
+    logger.info(f"diarize: ml-service read timeout = {read:.0f}s for ~{duration_sec/60:.0f} min audio")
+    return httpx.Timeout(read, connect=15.0)
+
+
+async def _diarize_url(
+    video_url: str, proxy: str | None, settings: Settings, duration_sec: float
+) -> list[tuple[float, float, str]]:
     """ml-service downloads the audio itself and returns speaker turns (captions path)."""
     endpoint = settings.ml_service_url.rstrip("/") + "/diarize"
     form = {"url": video_url}
     if proxy:
         form["proxy"] = proxy
-    async with httpx.AsyncClient(timeout=settings.diarize_timeout) as client:
+    async with httpx.AsyncClient(timeout=_scaled_timeout(duration_sec, settings)) as client:
         r = await client.post(endpoint, data=form)
         r.raise_for_status()
         return _parse_turns(r.json())
 
 
-async def _diarize_file(wav_bytes: bytes, settings: Settings) -> list[tuple[float, float, str]]:
+async def _diarize_file(
+    wav_bytes: bytes, settings: Settings, duration_sec: float
+) -> list[tuple[float, float, str]]:
     """Diarize already-downloaded audio (Groq-fallback path, reuses the download)."""
     endpoint = settings.ml_service_url.rstrip("/") + "/diarize"
-    async with httpx.AsyncClient(timeout=settings.diarize_timeout) as client:
+    async with httpx.AsyncClient(timeout=_scaled_timeout(duration_sec, settings)) as client:
         r = await client.post(endpoint, files={"file": ("audio.wav", wav_bytes, "audio/wav")})
         r.raise_for_status()
         return _parse_turns(r.json())
@@ -232,14 +247,18 @@ async def process_youtube_diarize(url: str) -> dict:
     if cues_lang:
         cues, lang = cues_lang
         source = "captions"
-        logger.info(f"diarize: using {len(cues)} caption cues ({lang}); ml-service will fetch audio")
-        turns = await _diarize_url(url, proxy, settings)
+        duration = max((c["end"] for c in cues), default=0.0)  # last cue end ≈ video length
+        logger.info(
+            f"diarize: using {len(cues)} caption cues ({lang}, ~{duration/60:.0f} min); ml-service will fetch audio"
+        )
+        turns = await _diarize_url(url, proxy, settings, duration)
     else:
         logger.info("diarize: no captions, falling back to Groq ASR")
         raw_audio, ext = await _download_audio(url, proxy)
         wav = await _to_wav16k(raw_audio, ext)
         mp3 = await _to_mp3_small(raw_audio, ext)
-        turns_task = asyncio.create_task(_diarize_file(wav, settings))
+        duration = len(wav) / 32000.0  # 16 kHz mono s16le → 32000 bytes/sec
+        turns_task = asyncio.create_task(_diarize_file(wav, settings, duration))
         cues, lang = await _groq_word_cues(mp3, settings)
         source = "asr"
         logger.info(f"diarize: Groq produced {len(cues)} word cues ({lang})")
