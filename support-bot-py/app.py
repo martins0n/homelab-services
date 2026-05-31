@@ -73,6 +73,7 @@ async def handle_start(chat_id):
         "sy - Summarize YouTube video (shortcut)\n"
         "youtube_transcript - Get transcript with Telegraph pages\n"
         "yt - Get transcript with Telegraph pages (shortcut)\n"
+        "yd - Speaker-diarized transcript (add a number to force the speaker count, e.g. /yd <url> 2)\n"
         "prompt - Direct OpenAI prompt\n"
         "\n"
         "Forward any video, voice message, or round video-note to me "
@@ -134,15 +135,27 @@ def _wants_speakers(text: str) -> bool:
     return bool(re.search(r"\b(speakers?|diariz\w*)\b", text, re.IGNORECASE))
 
 
+def _speaker_count(text: str) -> int:
+    """Optional exact speaker count: '/yt <url> speakers 2' -> 2 (else -1 = auto).
+    Scans whitespace tokens so digits inside the URL (one token) are never matched.
+    Auto-detection over-splits on long multilingual audio, so this hint is the
+    reliable way to pin a known count."""
+    for tok in text.split():
+        if tok.isdigit():
+            return int(tok)
+    return -1
+
+
 async def handle_youtube_diarize(chat_id, matched):
     """Handler for the diarized (speaker-labeled) YouTube transcript path."""
     logger.info(f"Received diarized youtube request: {matched}")
     try:
         url = re.search(r"(https?://[^\s]+)", matched).group(0)
+        num_speakers = _speaker_count(matched)
         await telegram_bot.send_message(
             chat_id, "🎬🗣️ Diarizing video (downloading audio + detecting speakers, this can take a few minutes)..."
         )
-        result = await process_youtube_diarize(url)
+        result = await process_youtube_diarize(url, num_speakers=num_speakers)
 
         video_id = result["video_id"]
         youtube_url = f"https://www.youtube.com/watch?v={video_id}"
@@ -347,6 +360,11 @@ async def handle_message(request: TelegramRequest):
     elif text.startswith("/summary_url"):
         matched = re.match(r"/summary_url (.+)", text).group(1)
         await handle_summary_url(chat_id, matched)
+    elif text.startswith("/yd"):
+        # Direct diarization shortcut: '/yd <url> [N]' (no 'speakers' keyword
+        # needed; a trailing number forces the exact speaker count).
+        matched = re.match(r"/yd (.+)", text).group(1)
+        await handle_youtube_diarize(chat_id, matched)
     elif text.startswith("/yt"):
         matched = re.match(r"/yt (.+)", text).group(1)
         if _wants_speakers(matched):

@@ -37,8 +37,12 @@ services:
       - ../stack.env
     environment:
       ENGINE: sherpa
-      # sherpa: lower threshold -> more speakers; raise toward 0.6 if voices split.
-      SHERPA_CLUSTER_THRESHOLD: "0.5"
+      # Multilingual CAM++ embedder (robust on non-English); English-only
+      # wespeaker over-split foreign speech. Auto speaker-count via threshold:
+      # lower -> more speakers, raise toward 0.8 if voices still split. Pass
+      # num_speakers to /diarize (e.g. bot's `/yd <url> 2`) to force an exact count.
+      SHERPA_EMBEDDING_MODEL: /app/models/3dspeaker_campplus_sv_zh_en.onnx
+      SHERPA_CLUSTER_THRESHOLD: "0.7"
       # pyannote engine only (ignored by sherpa):
       HF_HOME: /models
       PYANNOTE_MODEL: pyannote/speaker-diarization-community-1

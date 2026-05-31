@@ -44,14 +44,20 @@ SHERPA_SEG_MODEL = os.environ.get(
     "SHERPA_SEGMENTATION_MODEL",
     "/app/models/sherpa-onnx-pyannote-segmentation-3-0/model.onnx",
 )
+# Multilingual CAM++ (3D-Speaker, CN-Celeb + VoxCeleb). The English-only
+# wespeaker model scattered on non-English speech — a 22-min Armenian clip
+# auto-detected as 16 speakers. This model holds a 4-speaker reference clip at
+# exactly 4 while cutting the Armenian over-split, at the same speed (RTF ~0.26).
 SHERPA_EMB_MODEL = os.environ.get(
     "SHERPA_EMBEDDING_MODEL",
-    "/app/models/wespeaker_en_voxceleb_CAM++.onnx",
+    "/app/models/3dspeaker_campplus_sv_zh_en.onnx",
 )
 # Cosine-distance threshold for auto speaker-count detection: smaller -> more
-# speakers, larger -> fewer. ~0.5 is a good default for 1-3 speaker dialogue;
-# bump toward 0.6 if distinct voices get split. Ignored when num_speakers given.
-SHERPA_THRESHOLD = float(os.environ.get("SHERPA_CLUSTER_THRESHOLD", "0.5"))
+# speakers, larger -> fewer. 0.7 (was 0.5) — 0.5 over-split long conversations;
+# 0.7 is the best auto setting that still holds a 4-speaker reference clip at 4.
+# Auto-counting is inherently approximate on long multilingual audio; pass
+# num_speakers to force an exact count (threshold then ignored).
+SHERPA_THRESHOLD = float(os.environ.get("SHERPA_CLUSTER_THRESHOLD", "0.7"))
 SHERPA_NUM_THREADS = int(os.environ.get("SHERPA_NUM_THREADS", "4"))
 
 TARGET_SR = 16000

@@ -26,23 +26,33 @@ RUN pip install --no-cache-dir \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Pre-download the sherpa-onnx diarization models (~35 MB) so the default engine
-# starts offline and the image is self-contained. These live OUTSIDE the /models
-# volume (which holds the pyannote HF cache) so the named-volume mount can't shadow
-# them. Segmentation = pyannote-3.0 (ONNX); embedding = WeSpeaker CAM++ (English).
+# Pre-download the sherpa-onnx diarization models so the default engine starts
+# offline and the image is self-contained. These live OUTSIDE the /models volume
+# (which holds the pyannote HF cache) so the named-volume mount can't shadow them.
+# Segmentation = pyannote-3.0 (ONNX). Two embedders: multilingual CAM++ (default,
+# 3D-Speaker zh_en — robust on non-English) and the older English-only WeSpeaker
+# CAM++ (kept for SHERPA_EMBEDDING_MODEL overrides / comparison).
 ARG SHERPA_REL=https://github.com/k2-fsa/sherpa-onnx/releases/download
 RUN mkdir -p /app/models && cd /app/models \
     && curl -fsSL -o seg.tar.bz2 \
         "${SHERPA_REL}/speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2" \
     && tar xjf seg.tar.bz2 && rm seg.tar.bz2 \
     && curl -fsSL -o "wespeaker_en_voxceleb_CAM++.onnx" \
-        "${SHERPA_REL}/speaker-recongition-models/wespeaker_en_voxceleb_CAM%2B%2B.onnx"
+        "${SHERPA_REL}/speaker-recongition-models/wespeaker_en_voxceleb_CAM%2B%2B.onnx" \
+    && curl -fsSL -o "3dspeaker_campplus_sv_zh_en.onnx" \
+        "${SHERPA_REL}/speaker-recongition-models/3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx"
 
 COPY app.py .
 
 # Default engine: sherpa-onnx (lightweight, CPU, ~10x faster than pyannote here).
 # Set ENGINE=pyannote to use the higher-accuracy torch pipeline instead.
 ENV ENGINE=sherpa
+# Multilingual CAM++ embedder + threshold 0.7 are the prod-effective defaults.
+# The deploy webhook only `--pull always`s the image (it never git-pulls the
+# compose file), so these image ENVs — not the compose env — are what flip the
+# defaults in production.
+ENV SHERPA_EMBEDDING_MODEL=/app/models/3dspeaker_campplus_sv_zh_en.onnx
+ENV SHERPA_CLUSTER_THRESHOLD=0.7
 # HF weights cache (pyannote engine) -> mount a volume here so models aren't
 # re-downloaded on restart.
 ENV HF_HOME=/models

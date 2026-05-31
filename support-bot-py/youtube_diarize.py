@@ -139,13 +139,15 @@ def _scaled_timeout(duration_sec: float, settings: Settings) -> "httpx.Timeout":
 
 
 async def _diarize_url(
-    video_url: str, proxy: str | None, settings: Settings, duration_sec: float
+    video_url: str, proxy: str | None, settings: Settings, duration_sec: float, num_speakers: int = -1
 ) -> list[tuple[float, float, str]]:
     """ml-service downloads the audio itself and returns speaker turns (captions path)."""
     endpoint = settings.ml_service_url.rstrip("/") + "/diarize"
     form = {"url": video_url}
     if proxy:
         form["proxy"] = proxy
+    if num_speakers and num_speakers > 0:
+        form["num_speakers"] = str(num_speakers)
     async with httpx.AsyncClient(timeout=_scaled_timeout(duration_sec, settings)) as client:
         r = await client.post(endpoint, data=form)
         r.raise_for_status()
@@ -153,12 +155,13 @@ async def _diarize_url(
 
 
 async def _diarize_file(
-    wav_bytes: bytes, settings: Settings, duration_sec: float
+    wav_bytes: bytes, settings: Settings, duration_sec: float, num_speakers: int = -1
 ) -> list[tuple[float, float, str]]:
     """Diarize already-downloaded audio (Groq-fallback path, reuses the download)."""
     endpoint = settings.ml_service_url.rstrip("/") + "/diarize"
+    data = {"num_speakers": str(num_speakers)} if num_speakers and num_speakers > 0 else None
     async with httpx.AsyncClient(timeout=_scaled_timeout(duration_sec, settings)) as client:
-        r = await client.post(endpoint, files={"file": ("audio.wav", wav_bytes, "audio/wav")})
+        r = await client.post(endpoint, files={"file": ("audio.wav", wav_bytes, "audio/wav")}, data=data)
         r.raise_for_status()
         return _parse_turns(r.json())
 
@@ -228,14 +231,18 @@ async def _translate_preserving_labels(text: str, settings: Settings) -> str:
     return "\n".join(out)
 
 
-async def process_youtube_diarize(url: str) -> dict:
+async def process_youtube_diarize(url: str, num_speakers: int = -1) -> dict:
     """Full diarized-transcript pipeline. Returns a dict with transcript_urls,
-    original_language, num_speakers, and source ('captions' | 'asr')."""
+    original_language, num_speakers, and source ('captions' | 'asr').
+
+    num_speakers > 0 forces an exact speaker count (passed to ml-service); -1
+    lets the engine auto-detect. Auto-detection over-splits on long multilingual
+    audio, so the exact-count hint is the reliable path for known counts."""
     settings = Settings()
     video_id = get_youtube_id(url)
     if not video_id:
         raise ValueError("could not parse YouTube id")
-    logger.info(f"diarize: processing {video_id}")
+    logger.info(f"diarize: processing {video_id} (num_speakers={num_speakers})")
 
     proxy = settings.youtube_proxy_url
     proxies = {"https": proxy} if proxy else None
@@ -251,14 +258,14 @@ async def process_youtube_diarize(url: str) -> dict:
         logger.info(
             f"diarize: using {len(cues)} caption cues ({lang}, ~{duration/60:.0f} min); ml-service will fetch audio"
         )
-        turns = await _diarize_url(url, proxy, settings, duration)
+        turns = await _diarize_url(url, proxy, settings, duration, num_speakers)
     else:
         logger.info("diarize: no captions, falling back to Groq ASR")
         raw_audio, ext = await _download_audio(url, proxy)
         wav = await _to_wav16k(raw_audio, ext)
         mp3 = await _to_mp3_small(raw_audio, ext)
         duration = len(wav) / 32000.0  # 16 kHz mono s16le → 32000 bytes/sec
-        turns_task = asyncio.create_task(_diarize_file(wav, settings, duration))
+        turns_task = asyncio.create_task(_diarize_file(wav, settings, duration, num_speakers))
         cues, lang = await _groq_word_cues(mp3, settings)
         source = "asr"
         logger.info(f"diarize: Groq produced {len(cues)} word cues ({lang})")
@@ -293,7 +300,8 @@ if __name__ == "__main__":
 
     async def _main():
         url = sys.argv[1] if len(sys.argv) > 1 else "https://www.youtube.com/watch?v=0GqGWC3tjPI"
-        result = await process_youtube_diarize(url)
+        n = int(sys.argv[2]) if len(sys.argv) > 2 else -1
+        result = await process_youtube_diarize(url, num_speakers=n)
         print(result)
 
     asyncio.run(_main())
