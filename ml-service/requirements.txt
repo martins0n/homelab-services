@@ -5,6 +5,10 @@
 fastapi[standard]==0.136.3
 uvicorn==0.48.0
 python-multipart==0.0.29
+# Default diarization engine (lightweight, CPU, no torch). Validated on RK3588.
+sherpa-onnx==1.13.2
+numpy
+# Optional higher-accuracy engine (ENGINE=pyannote); pulls torch (see Dockerfile).
 pyannote.audio==4.0.4
 soundfile==0.13.1
 yt-dlp
