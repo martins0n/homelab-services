@@ -7,6 +7,8 @@ POST /diarize  (multipart: file=<audio>  OR  url=<media url>)
                          num_speakers=<int>  (exact count, if known)
                          max_speakers=<int>  (pyannote only; cap)
                -> {"turns": [{start,end,speaker}], "num_speakers": N}
+POST /tts      (form: segments=<JSON [{voice,text}]>, speed=<float>)
+               -> mp3 audio (Piper TTS; reads translated transcripts aloud)
 GET  /health   -> readiness + which engine/model is loaded
 
 Two diarization engines, chosen at startup via ENGINE:
@@ -27,7 +29,7 @@ import os
 import tempfile
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Response, UploadFile
 from fastapi.concurrency import run_in_threadpool
 
 logging.basicConfig(level=logging.INFO)
@@ -69,6 +71,17 @@ _sd = None            # sherpa OfflineSpeakerDiarization (auto-count default)
 # Serialize the heavy CPU work: two concurrent multi-threaded diarizations would
 # oversubscribe the 8 cores and run slower than one-at-a-time.
 _diar_lock = asyncio.Lock()
+
+# --- Piper TTS (read-aloud of translated transcripts) ---
+# Piper en_US voices for reading the English translation aloud (Android Chrome's
+# Read Aloud doesn't work on Telegraph, so the bot sends synthesized audio
+# instead). The caller assigns a voice per segment (per-speaker for diarized
+# transcripts). Engines are lazy-loaded + cached so the image only pays the cost
+# when TTS is actually requested.
+TTS_DIR = os.environ.get("TTS_MODELS_DIR", "/app/models/tts")
+TTS_SPEED = float(os.environ.get("TTS_SPEED", "0.8"))
+_tts_engines: dict = {}  # voice name -> OfflineTts
+_tts_lock = asyncio.Lock()
 
 
 def _build_sherpa(num_clusters: int = -1, threshold: float = SHERPA_THRESHOLD):
@@ -262,6 +275,96 @@ async def diarize(
             raise HTTPException(status_code=500, detail=f"diarization failed: {e}")
 
     return {"turns": turns, "num_speakers": len({t["speaker"] for t in turns})}
+
+
+def _get_tts(voice: str):
+    """Lazily build + cache a Piper OfflineTts for `voice` (e.g. 'amy'). Models
+    live in TTS_DIR/vits-piper-en_US-<voice>-low/ (model.onnx + tokens.txt +
+    espeak-ng-data). lexicon/dict_dir must be set explicitly ("") or the config
+    fails to validate."""
+    if voice not in _tts_engines:
+        import sherpa_onnx
+
+        d = os.path.join(TTS_DIR, f"vits-piper-en_US-{voice}-low")
+        onnx = os.path.join(d, f"en_US-{voice}-low.onnx")
+        config = sherpa_onnx.OfflineTtsConfig(
+            model=sherpa_onnx.OfflineTtsModelConfig(
+                vits=sherpa_onnx.OfflineTtsVitsModelConfig(
+                    model=onnx,
+                    lexicon="",
+                    tokens=os.path.join(d, "tokens.txt"),
+                    data_dir=os.path.join(d, "espeak-ng-data"),
+                    dict_dir="",
+                ),
+                num_threads=SHERPA_NUM_THREADS,
+                provider="cpu",
+            )
+        )
+        if not config.validate():
+            raise RuntimeError(f"invalid TTS config for voice '{voice}' (path {onnx})")
+        _tts_engines[voice] = sherpa_onnx.OfflineTts(config)
+    return _tts_engines[voice]
+
+
+def _synthesize_segments(segments: list[dict], speed: float, out_wav: str) -> None:
+    """Synthesize [{voice,text}] segments, concatenate them with short gaps, and
+    write a single wav. Each segment uses its own voice; segments are resampled to
+    the first segment's sample rate before concatenation."""
+    import numpy as np
+    import soundfile as sf
+
+    pieces = []
+    target_sr = None
+    for seg in segments:
+        text = (seg.get("text") or "").strip()
+        if not text:
+            continue
+        tts = _get_tts(seg.get("voice") or "amy")
+        audio = tts.generate(text, sid=0, speed=speed)
+        samp = np.asarray(audio.samples, dtype=np.float32)
+        if target_sr is None:
+            target_sr = audio.sample_rate
+        elif audio.sample_rate != target_sr:
+            idx = np.clip(
+                np.arange(0, len(samp), audio.sample_rate / target_sr).astype(np.int64),
+                0, len(samp) - 1,
+            )
+            samp = samp[idx]
+        pieces.append(samp)
+        pieces.append(np.zeros(int(target_sr * 0.35), dtype=np.float32))  # inter-segment gap
+    if not pieces:
+        raise RuntimeError("no non-empty TTS segments")
+    sf.write(out_wav, np.concatenate(pieces), target_sr)
+
+
+@app.post("/tts")
+async def tts(segments: str = Form(...), speed: float = Form(default=TTS_SPEED)):
+    """Read translated transcripts aloud. `segments` is a JSON list of
+    {voice, text}; per-speaker voices come from the caller assigning a voice per
+    segment. Returns the concatenated speech as a single mp3."""
+    import json
+
+    try:
+        segs = json.loads(segments)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"invalid segments JSON: {e}")
+    if not isinstance(segs, list) or not segs:
+        raise HTTPException(status_code=400, detail="segments must be a non-empty list")
+
+    with tempfile.TemporaryDirectory() as d:
+        wav = os.path.join(d, "tts.wav")
+        mp3 = os.path.join(d, "tts.mp3")
+        try:
+            async with _tts_lock:
+                await run_in_threadpool(_synthesize_segments, segs, speed, wav)
+            await _run("ffmpeg", "-y", "-loglevel", "error", "-i", wav,
+                       "-ac", "1", "-c:a", "libmp3lame", "-b:a", "48k", mp3)
+        except Exception as e:
+            logger.exception("tts failed")
+            raise HTTPException(status_code=500, detail=f"tts failed: {e}")
+        with open(mp3, "rb") as f:
+            data = f.read()
+    return Response(content=data, media_type="audio/mpeg")
 
 
 if __name__ == "__main__":

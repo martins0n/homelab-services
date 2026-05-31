@@ -15,6 +15,7 @@ is skipped when captions exist (the cheap, higher-quality path).
 """
 import asyncio
 import os
+import re
 import tempfile
 
 import httpx
@@ -23,6 +24,7 @@ from openai import AsyncOpenAI
 from youtube_transcript_api import NoTranscriptFound, YouTubeTranscriptApi
 
 from settings import Settings
+from tts_client import voice_for_speaker
 from video_translator import _DIARIZE_TRANSLATE_PROMPT, _is_refusal
 from youtube import get_youtube_id
 from youtube_transcript import _create_telegraph_pages, _summarize
@@ -231,6 +233,28 @@ async def _translate_preserving_labels(text: str, settings: Settings) -> str:
     return "\n".join(out)
 
 
+_SPEAKER_LINE_RE = re.compile(r"^\s*Speaker\s+(\d+)\s*:\s*(.*)$")
+
+
+def _diar_tts_segments(diarized_text: str) -> list[dict]:
+    """Turn 'Speaker N: ...' lines into [{voice, text}] for per-speaker TTS.
+    Each speaker number maps to a distinct pool voice (round-robin); a line with
+    no speaker label is appended to the previous segment so wrapped text stays
+    with its speaker."""
+    segments: list[dict] = []
+    for line in diarized_text.split("\n"):
+        m = _SPEAKER_LINE_RE.match(line)
+        if m:
+            text = m.group(2).strip()
+            if text:
+                segments.append({"voice": voice_for_speaker(int(m.group(1))), "text": text})
+        else:
+            extra = line.strip()
+            if extra and segments:
+                segments[-1]["text"] += " " + extra
+    return segments
+
+
 async def process_youtube_diarize(url: str, num_speakers: int = -1) -> dict:
     """Full diarized-transcript pipeline. Returns a dict with transcript_urls,
     original_language, num_speakers, and source ('captions' | 'asr').
@@ -281,6 +305,13 @@ async def process_youtube_diarize(url: str, num_speakers: int = -1) -> dict:
     is_english = lang.lower().startswith("en")
     translated = diarized if is_english else await _translate_preserving_labels(diarized, settings)
 
+    # Read-aloud audio (per-speaker voices) only when we actually translated to
+    # English. For English or Russian sources the user listens to the original, so
+    # skip synthesis. The handler turns these segments into a Telegram audio message.
+    tts_segments = None
+    if not (lang.lower().startswith("en") or lang.lower().startswith("ru")):
+        tts_segments = _diar_tts_segments(translated)
+
     header = f"SPEAKER-DIARIZED TRANSCRIPT ({num_speakers} speakers, source: {source})\n\n"
     transcript_urls = await _create_telegraph_pages(
         f"Diarized Transcript: {video_id}", header + translated
@@ -301,6 +332,7 @@ async def process_youtube_diarize(url: str, num_speakers: int = -1) -> dict:
         "transcript_urls": transcript_urls,
         "summary_url": summary_urls[0] if summary_urls else None,
         "summary_text": summary_text,
+        "tts_segments": tts_segments,
     }
 
 

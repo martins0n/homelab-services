@@ -17,6 +17,7 @@ from schemas import TelegramMessage, TelegramRequest
 from settings import Settings
 from summarizer import summary_url
 from telegram import TelegramBot
+from tts_client import synthesize_segments
 from utils import create_verify_token_function, filter_context_size
 from video_translator import translate_media
 from youtube import get_transcript_summary
@@ -90,6 +91,28 @@ async def handle_summary_youtube(chat_id, matched):
     await telegram_bot.send_message(chat_id, f"Summary {url}:\n\n{summary_text}")
 
 
+async def _send_tts_audio(chat_id, result: dict):
+    """If the pipeline produced read-aloud segments (only when the source was
+    translated to English), synthesize them via ml-service and send the audio as a
+    Telegram message. Best-effort: never raises, so a TTS failure can't break the
+    text reply that was already sent."""
+    segments = result.get("tts_segments")
+    if not segments:
+        return
+    try:
+        await telegram_bot.send_message(chat_id, "🔊 Generating audio of the translation...")
+        audio = await synthesize_segments(segments, settings)
+        if audio:
+            video_id = result.get("video_id", "audio")
+            await telegram_bot.send_audio(
+                chat_id, audio, filename=f"{video_id}.mp3",
+                title=f"Translation {video_id}",
+                caption="🔊 Read-aloud translation",
+            )
+    except Exception as e:
+        logger.error(f"Error sending TTS audio: {e!r}")
+
+
 async def handle_youtube_transcript(chat_id, matched):
     """Handler for /youtube_transcript command"""
     logger.info(f"Received /youtube_transcript command with URL: {matched}")
@@ -122,6 +145,8 @@ async def handle_youtube_transcript(chat_id, matched):
         message_parts.append(f"\n<b>Summary:</b>\n{result['summary_text']}")
 
         await telegram_bot.send_message(chat_id, "\n".join(message_parts), parse_mode="HTML")
+
+        await _send_tts_audio(chat_id, result)
 
     except NoTranscriptFound:
         await telegram_bot.send_message(chat_id, "❌ No transcript available for this video.")
@@ -179,6 +204,8 @@ async def handle_youtube_diarize(chat_id, matched):
             message_parts.append(f"\n<b>Summary:</b>\n{html.escape(result['summary_text'])}")
 
         await telegram_bot.send_message(chat_id, "\n".join(message_parts), parse_mode="HTML")
+
+        await _send_tts_audio(chat_id, result)
 
     except NoTranscriptFound:
         await telegram_bot.send_message(chat_id, "❌ No transcript available for this video.")

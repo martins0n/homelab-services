@@ -6,6 +6,7 @@ from openai import AsyncOpenAI
 from youtube_transcript_api import NoTranscriptFound, YouTubeTranscriptApi
 
 from settings import Settings
+from tts_client import VOICE_POOL
 from youtube import get_youtube_id
 
 # Module-level cache for Telegraph access token
@@ -252,6 +253,13 @@ async def _summarize(text: str, settings: Settings) -> str:
     if chunk_summaries:
         return chunk_summaries[0]
     return "Summary could not be generated for this transcript."
+
+
+def _narrator_segments(text: str, voice: str | None = None) -> list[dict]:
+    """Single-narrator TTS segments: one voice reads the whole text, split on
+    paragraph boundaries so a long transcript synthesizes in chunks."""
+    v = voice or VOICE_POOL[0]
+    return [{"voice": v, "text": p.strip()} for p in text.split("\n\n") if p.strip()]
 
 
 async def process_youtube_transcript(url: str) -> dict:
@@ -502,12 +510,21 @@ async def process_youtube_transcript(url: str) -> dict:
         summary_text
     )
 
+    # Read-aloud audio (single narrator) only when we actually translated to
+    # English. English or Russian sources are skipped (user listens to the
+    # original). The handler turns these segments into a Telegram audio message.
+    lang_lc = (original_lang or "").lower()
+    tts_segments = None
+    if not (lang_lc.startswith("en") or lang_lc.startswith("ru")):
+        tts_segments = _narrator_segments(translated_text)
+
     return {
         'video_id': video_id,
         'original_language': original_lang,
         'transcript_urls': transcript_urls,
         'summary_url': summary_url,
-        'summary_text': summary_text
+        'summary_text': summary_text,
+        'tts_segments': tts_segments,
     }
 
 

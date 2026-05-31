@@ -63,5 +63,30 @@ class TelegramBot:
                 result.raise_for_status()
             return result.content
 
+    async def send_audio(
+        self,
+        chat_id: int,
+        audio_bytes: bytes,
+        filename: str = "audio.mp3",
+        caption: str | None = None,
+        title: str | None = None,
+    ):
+        """Send an audio file as a multipart upload. Telegram shows an inline audio
+        player (works on Android, unlike Telegraph Read Aloud). Used to read
+        translated transcripts aloud."""
+        async with AsyncClient(base_url=self._bot_base()) as client:
+            data = {"chat_id": str(chat_id)}
+            if caption:
+                data["caption"] = caption
+            if title:
+                data["title"] = title
+            files = {"audio": (filename, audio_bytes, "audio/mpeg")}
+            result = await client.post("/sendAudio", data=data, files=files, timeout=120.0)
+            logger.info(
+                f"Sent audio to chat {chat_id} with status code {result.status_code}"
+            )
+            if result.status_code != 200:
+                logger.error(f"Telegram sendAudio error: {result.text}")
+
     async def close(self):
         await self.client.aclose()

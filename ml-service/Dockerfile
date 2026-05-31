@@ -42,6 +42,17 @@ RUN mkdir -p /app/models && cd /app/models \
     && curl -fsSL -o "3dspeaker_campplus_sv_zh_en.onnx" \
         "${SHERPA_REL}/speaker-recongition-models/3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx"
 
+# Pre-download Piper TTS voices (sherpa-onnx VITS) so the bot can read translated
+# transcripts aloud (Android Chrome's Read Aloud is broken on Telegraph pages).
+# en_US "low" voices, ~20 MB each; one per speaker, round-robined by the bot.
+ARG PIPER_REL=https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models
+RUN set -eux; mkdir -p /app/models/tts; cd /app/models/tts; \
+    for v in amy ryan kathleen lessac; do \
+        curl -fsSL -o "$v.tar.bz2" "${PIPER_REL}/vits-piper-en_US-$v-low.tar.bz2"; \
+        tar xjf "$v.tar.bz2"; \
+        rm "$v.tar.bz2"; \
+    done
+
 COPY app.py .
 
 # Default engine: sherpa-onnx (lightweight, CPU, ~10x faster than pyannote here).
@@ -53,6 +64,10 @@ ENV ENGINE=sherpa
 # defaults in production.
 ENV SHERPA_EMBEDDING_MODEL=/app/models/3dspeaker_campplus_sv_zh_en.onnx
 ENV SHERPA_CLUSTER_THRESHOLD=0.7
+# Piper TTS: voices baked at /app/models/tts; all speakers read at 0.8x speed
+# (slower = easier to follow a translated conversation; user preference).
+ENV TTS_MODELS_DIR=/app/models/tts
+ENV TTS_SPEED=0.8
 # HF weights cache (pyannote engine) -> mount a volume here so models aren't
 # re-downloaded on restart.
 ENV HF_HOME=/models
