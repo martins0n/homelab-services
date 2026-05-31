@@ -25,7 +25,7 @@ from youtube_transcript_api import NoTranscriptFound, YouTubeTranscriptApi
 from settings import Settings
 from video_translator import _DIARIZE_TRANSLATE_PROMPT, _is_refusal
 from youtube import get_youtube_id
-from youtube_transcript import _create_telegraph_pages
+from youtube_transcript import _create_telegraph_pages, _summarize
 
 
 async def _ffmpeg(in_bytes: bytes, in_ext: str, out_args: list[str]) -> bytes:
@@ -286,12 +286,21 @@ async def process_youtube_diarize(url: str, num_speakers: int = -1) -> dict:
         f"Diarized Transcript: {video_id}", header + translated
     )
 
+    # Summarize the speaker-labeled transcript (same summarizer as the plain
+    # transcript path); the Speaker N: labels stay in the input so the summary
+    # can attribute points to speakers. Mirrors process_youtube_transcript's
+    # summary_text / summary_url so the diarized reply isn't missing a summary.
+    summary_text = await _summarize(translated, settings)
+    summary_urls = await _create_telegraph_pages(f"Diarized Summary: {video_id}", summary_text)
+
     return {
         "video_id": video_id,
         "original_language": lang,
         "num_speakers": num_speakers,
         "source": source,
         "transcript_urls": transcript_urls,
+        "summary_url": summary_urls[0] if summary_urls else None,
+        "summary_text": summary_text,
     }
 
 

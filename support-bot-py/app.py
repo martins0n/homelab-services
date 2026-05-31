@@ -173,6 +173,11 @@ async def handle_youtube_diarize(chat_id, matched):
         else:
             message_parts.append("⚠️ Transcript page could not be created.")
 
+        if result.get("summary_url"):
+            message_parts.append(f"📝 <a href=\"{result['summary_url']}\">Summary</a>")
+        if result.get("summary_text"):
+            message_parts.append(f"\n<b>Summary:</b>\n{html.escape(result['summary_text'])}")
+
         await telegram_bot.send_message(chat_id, "\n".join(message_parts), parse_mode="HTML")
 
     except NoTranscriptFound:
