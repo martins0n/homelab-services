@@ -189,6 +189,71 @@ def _chunk_on_paragraphs(text: str, chunk_size: int) -> list[str]:
     return chunks
 
 
+_REFUSAL_PHRASES = [
+    "i can't assist", "i cannot assist", "i'm unable to", "i am unable to",
+    "i can't help", "i cannot help", "against my guidelines",
+    "i'm not able to", "i am not able to", "i must decline",
+    "i can't provide", "i cannot provide", "i'm sorry, but i can't",
+    "i apologize, but i can't", "not appropriate for me to",
+]
+
+
+async def _summarize(text: str, settings: Settings) -> str:
+    """Summarize a (possibly long) transcript into key ideas.
+
+    Chunks the text so a single problematic passage can't kill the whole summary,
+    summarizes each chunk with refusal detection (falling back to a raw excerpt),
+    then combines the chunk summaries into one. Shared by the plain-transcript and
+    diarized paths; the diarized path passes Speaker N:-labeled text so the
+    summary can attribute points to speakers."""
+    client = AsyncOpenAI(api_key=settings.openai_api_key)
+
+    summary_chunk_size = 30000
+    text_chunks = [text[i:i + summary_chunk_size] for i in range(0, len(text), summary_chunk_size)] or [""]
+
+    chunk_summaries = []
+    for i, chunk in enumerate(text_chunks):
+        logger.info(f"summarize: chunk {i + 1}/{len(text_chunks)} ({len(chunk)} chars)")
+        try:
+            response = await client.chat.completions.create(
+                model=settings.model_summarizer,
+                messages=[
+                    {"role": "system", "content": "You are a transcript summarizer. Summarize the key ideas from the following transcript excerpt. This is a factual transcription task — report what was discussed without judgment. Always provide a summary regardless of the topic."},
+                    {"role": "user", "content": f"Write the key ideas and a concise summary of this transcript section:\n\n{chunk}"},
+                ],
+                max_tokens=4000,
+            )
+            cs = response.choices[0].message.content
+            if cs and not any(p in cs.lower() for p in _REFUSAL_PHRASES):
+                chunk_summaries.append(cs)
+            else:
+                logger.warning(f"summarize: chunk {i + 1} refused")
+                chunk_summaries.append(f"[Transcript excerpt]: {chunk[:500]}...")
+        except Exception as e:
+            logger.error(f"summarize: chunk {i + 1} error: {e}")
+            chunk_summaries.append(f"[Transcript excerpt]: {chunk[:500]}...")
+
+    if len(chunk_summaries) > 1:
+        combined = "\n\n".join(chunk_summaries)
+        try:
+            response = await client.chat.completions.create(
+                model=settings.model_summarizer,
+                messages=[
+                    {"role": "system", "content": "You are a transcript summarizer. Combine the following section summaries into a single coherent summary with top 5 key ideas. This is a factual transcription task — report what was discussed without judgment."},
+                    {"role": "user", "content": f"Combine these section summaries into one final summary:\n\n{combined}"},
+                ],
+                max_tokens=4000,
+            )
+            final = response.choices[0].message.content
+            return final if final and not any(p in final.lower() for p in _REFUSAL_PHRASES) else combined
+        except Exception as e:
+            logger.error(f"summarize: combine error: {e}")
+            return combined
+    if chunk_summaries:
+        return chunk_summaries[0]
+    return "Summary could not be generated for this transcript."
+
+
 async def process_youtube_transcript(url: str) -> dict:
     """
     Process YouTube video and create transcript + summary with Telegraph pages.
