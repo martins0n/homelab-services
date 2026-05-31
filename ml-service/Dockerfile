@@ -1,9 +1,11 @@
 FROM python:3.10-slim
 
 # ffmpeg + libsndfile for audio I/O; ffmpeg/yt-dlp also used to fetch audio from a
-# URL; curl downloads the sherpa-onnx diarization models at build time.
+# URL; curl downloads the sherpa-onnx diarization models at build time; bzip2 is
+# what `tar xjf` shells out to for the .tar.bz2 model archive (the slim base image
+# ships tar but NOT the bzip2 binary, so extraction fails without it).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg libsndfile1 curl ca-certificates \
+    ffmpeg libsndfile1 curl ca-certificates bzip2 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
