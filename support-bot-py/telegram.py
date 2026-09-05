@@ -3,6 +3,14 @@ import os
 from httpx import AsyncClient
 from loguru import logger
 
+# In --local mode the self-hosted Bot API server downloads the whole file from
+# Telegram's DC *before* it answers getFile, so the response can take minutes on
+# a large video. httpx's 5 s default read timeout turned that into a ReadTimeout
+# (and orphaned the finished download in the shared volume). Cloud API answers
+# getFile immediately, so it keeps a short-ish timeout.
+GET_FILE_TIMEOUT_LOCAL = 900.0
+GET_FILE_TIMEOUT_CLOUD = 60.0
+
 
 class TelegramBot:
     def __init__(self, token: str, local_api_url: str | None = None):
@@ -35,8 +43,11 @@ class TelegramBot:
                 logger.error(f"Telegram API error: {result.text}")
 
     async def get_file(self, file_id: str) -> dict:
+        timeout = GET_FILE_TIMEOUT_LOCAL if self.local_mode else GET_FILE_TIMEOUT_CLOUD
         async with AsyncClient(base_url=self._bot_base()) as client:
-            result = await client.post("/getFile", json={"file_id": file_id})
+            result = await client.post(
+                "/getFile", json={"file_id": file_id}, timeout=timeout
+            )
             if result.status_code != 200:
                 logger.error(f"Telegram getFile error: {result.text}")
                 result.raise_for_status()
