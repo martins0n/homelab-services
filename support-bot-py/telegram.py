@@ -11,6 +11,76 @@ from loguru import logger
 GET_FILE_TIMEOUT_LOCAL = 900.0
 GET_FILE_TIMEOUT_CLOUD = 60.0
 
+# Telegram rejects a sendMessage over 4096 characters with
+# 400 "message is too long", and the limit counts UTF-16 code units, not
+# code points. Leave headroom for the entity offsets Telegram adds.
+TELEGRAM_MESSAGE_LIMIT = 4000
+
+
+def _tg_len(text: str) -> int:
+    """Length as Telegram counts it: UTF-16 code units (astral chars cost 2)."""
+    return len(text.encode("utf-16-le")) // 2
+
+
+def _cut_at(text: str, limit: int) -> int:
+    """Largest cut index whose prefix fits `limit`, never inside an HTML tag."""
+    i = min(limit, len(text))
+    while i > 1 and _tg_len(text[:i]) > limit:
+        i -= 1
+    opened = text.rfind("<", 0, i)
+    if opened > 0 and text.find(">", opened, i) == -1:
+        i = opened
+    return max(i, 1)
+
+
+def _split_line(line: str, limit: int) -> list[str]:
+    """Break one over-long line on spaces, hard-cutting a word that still won't fit."""
+    if _tg_len(line) <= limit:
+        return [line]
+    parts: list[str] = []
+    cur = ""
+    for word in line.split(" "):
+        candidate = word if not cur else f"{cur} {word}"
+        if _tg_len(candidate) <= limit:
+            cur = candidate
+            continue
+        if cur:
+            parts.append(cur)
+            cur = ""
+        while _tg_len(word) > limit:
+            cut = _cut_at(word, limit)
+            parts.append(word[:cut])
+            word = word[cut:]
+        cur = word
+    if cur:
+        parts.append(cur)
+    return parts
+
+
+def split_message(text: str, limit: int = TELEGRAM_MESSAGE_LIMIT) -> list[str]:
+    """Split `text` into chunks Telegram will accept, preferring line boundaries.
+
+    Splitting on whole lines keeps parse_mode="HTML" valid: every tag this bot
+    emits (<b>Speaker N:</b>, the source <a href>) lives within a single line, so
+    no chunk can end mid-element. _cut_at guards the hard-split fallback.
+    """
+    if _tg_len(text) <= limit:
+        return [text]
+    chunks: list[str] = []
+    cur = ""
+    for line in text.split("\n"):
+        for piece in _split_line(line, limit):
+            candidate = piece if not cur else f"{cur}\n{piece}"
+            if _tg_len(candidate) <= limit:
+                cur = candidate
+            else:
+                if cur:
+                    chunks.append(cur)
+                cur = piece
+    if cur:
+        chunks.append(cur)
+    return chunks
+
 
 class TelegramBot:
     def __init__(self, token: str, local_api_url: str | None = None):
@@ -22,25 +92,31 @@ class TelegramBot:
         return f"{self.api_base_url}/bot{self.token}"
 
     async def send_message(self, chat_id: int, text: str, parse_mode: str = None):
+        """Send `text`, split across several messages when it exceeds Telegram's
+        4096-character limit (a long translation used to be lost to a 400)."""
+        parts = split_message(text)
         async with AsyncClient(base_url=self._bot_base()) as client:
-            payload = {
-                "chat_id": chat_id,
-                "text": text
-            }
-            if parse_mode:
-                payload["parse_mode"] = parse_mode
+            for i, part in enumerate(parts, 1):
+                payload = {
+                    "chat_id": chat_id,
+                    "text": part
+                }
+                if parse_mode:
+                    payload["parse_mode"] = parse_mode
 
-            result = await client.post(
-                "/sendMessage",
-                json=payload,
-                headers={"Content-Type": "application/json"},
-            )
-            logger.info(
-                f"Sent message to chat {chat_id} with status code {result.status_code}"
-            )
+                result = await client.post(
+                    "/sendMessage",
+                    json=payload,
+                    headers={"Content-Type": "application/json"},
+                )
+                suffix = f" (part {i}/{len(parts)})" if len(parts) > 1 else ""
+                logger.info(
+                    f"Sent message to chat {chat_id}{suffix} with status code {result.status_code}"
+                )
 
-            if result.status_code != 200:
-                logger.error(f"Telegram API error: {result.text}")
+                if result.status_code != 200:
+                    logger.error(f"Telegram API error: {result.text}")
+                    return
 
     async def get_file(self, file_id: str) -> dict:
         timeout = GET_FILE_TIMEOUT_LOCAL if self.local_mode else GET_FILE_TIMEOUT_CLOUD
